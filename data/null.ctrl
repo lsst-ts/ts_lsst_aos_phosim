@@ -1,0 +1,16 @@
+###
+
+This file contains the parameters for the AOS controller 
+
+###
+
+#control strategy
+control_strategy      null
+
+#These may still be useful for the estimator
+# (normalizedA, or optimal estimator)
+M1M3_actuator_penalty   5.9
+M2_actuator_penalty   5.9
+
+
+
