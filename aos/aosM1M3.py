@@ -35,6 +35,7 @@ class aosM1M3(object):
         self.bx = aa[:, 1]
         self.by = aa[:, 2]
         self.bz = aa[:, 3:]
+        
         aa = np.loadtxt('data/M1M3/M1M3_1um_156_force.DAT')
         self.force = aa[:, :]
 
