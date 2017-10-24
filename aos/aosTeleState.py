@@ -14,7 +14,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.time import Time
 from astropy.time import TimeDelta
-import aosCoTransform as ct
+import aos.aosCoTransform as ct
 from scipy.interpolate import Rbf
 
 from lsst.cwfs.tools import ZernikeAnnularFit

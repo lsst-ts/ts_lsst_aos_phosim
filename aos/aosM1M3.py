@@ -5,7 +5,7 @@
 
 import sys
 import numpy as np
-import aosCoTransform as ct
+import aos.aosCoTransform as ct
 from scipy.interpolate import Rbf
 
 from lsst.cwfs.tools import ZernikeAnnularFit

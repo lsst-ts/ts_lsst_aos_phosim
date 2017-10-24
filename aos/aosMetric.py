@@ -15,10 +15,10 @@ from lsst.cwfs.tools import padArray
 from lsst.cwfs.tools import extractArray
 from lsst.cwfs.tools import ZernikeAnnularFit
 from lsst.cwfs.tools import ZernikeAnnularEval
-
 from lsst.cwfs.errors import nonSquareImageError
-from aosErrors import psfSamplingTooLowError
-from aosTeleState import aosTeleState
+
+from aos.aosErrors import psfSamplingTooLowError
+from aos.aosTeleState import aosTeleState
 
 import matplotlib.pyplot as plt
 

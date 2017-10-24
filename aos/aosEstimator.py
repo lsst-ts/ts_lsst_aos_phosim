@@ -7,7 +7,7 @@ import os
 import glob
 
 import numpy as np
-from aosTeleState import aosTeleState
+from aos.aosTeleState import aosTeleState
 
 class aosEstimator(object):
 

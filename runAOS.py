@@ -5,18 +5,34 @@
 
 # main function
 
+import os
+
 from argparse import ArgumentParser
 from datetime import datetime
 
-from aosWFS import aosWFS
-from aosEstimator import aosEstimator
-from aosController import aosController
-from aosMetric import aosMetric
-from aosM1M3 import aosM1M3
-from aosM2 import aosM2
-from aosTeleState import aosTeleState
+from aos.aosWFS import aosWFS
+from aos.aosEstimator import aosEstimator
+from aos.aosController import aosController
+from aos.aosMetric import aosMetric
+from aos.aosM1M3 import aosM1M3
+from aos.aosM2 import aosM2
+from aos.aosTeleState import aosTeleState
 
-def main():
+def main(phosimDir, cwfsDir, outputDir, algoFile="exp", cwfsModel="offAxis"):
+    """
+    
+    Run the AOS close loop code.
+    
+    Arguments:
+        phosimDir {[str]} -- PhoSim directory.
+        cwfsDir {[str]} -- cwfs directory.
+        outputDir {[str]} -- Output files directory.
+    
+    Keyword Arguments:
+        algoFile {str} -- Algorithm to solve the transport of intensity equation (TIE). 
+                          (default: {"exp"})
+        cwfsModel {str} -- Optical model. (default: {"offAxis"})
+    """
 
     # Instantiate the parser for command line to use
     parser = __setParseAugs()
@@ -47,46 +63,56 @@ def main():
         band = args.wavestr
         wavelength = 0
 
+    # Get the effective wavelength
+    if (wavelength == 0):
+        effwave = aosTeleState.effwave[band]
+    else:
+        effwave = wavelength
+
     # *****************************************
     # simulate the perturbations
     # *****************************************
+
+    # Instantiate mirrors
     M1M3 = aosM1M3(args.debugLevel)
     M2 = aosM2(args.debugLevel)
-    phosimDir = "/Users/Wolf/Documents/bitbucket/phosim_syseng2"
-    # znPert = 28  # znmax used in pert file to define surfaces
 
+    # znPert = 28  # znmax used in pert file to define surfaces
 
     # *****************************************
     # run wavefront sensing algorithm
     # *****************************************
-    cwfsDir = "/Users/Wolf/Documents/github/cwfs"
-    algoFile = 'exp'
-    if wavelength == 0:
-        effwave = aosTeleState.effwave[band]
-    else:
-        effwave = wavelength
-    wfs = aosWFS(cwfsDir, args.inst, algoFile,
-                 128, band, effwave, args.debugLevel)
 
-    cwfsModel = 'offAxis'
+    # Instantiate the AOS wavefront sensor estimator
+    wfs = aosWFS(cwfsDir, args.inst, algoFile, 128, band, effwave, args.debugLevel)
 
     # *****************************************
     # state estimator
     # *****************************************
+
+    # State is defined after esti, b/c, for example, ndof we use in state
+    # depends on the estimator.
+    simDirName = "sim%d" % args.iSim
+
+    # Get the directory positions of image and perturbation
+    pertDir = os.path.join(outputDir, "pert", simDirName)
+    imageDir = os.path.join(outputDir, "image", simDirName)
+
+    # Instantiate the AOS estimator
     esti = aosEstimator(args.inst, args.estimatorParam, wfs, args.icomp,
                         args.izn3, args.debugLevel)
-    # state is defined after esti, b/c, for example, ndof we use in state
-    # depends on the estimator.
-    pertDir = 'pert/sim%d' % args.iSim
-    imageDir = 'image/sim%d' % args.iSim
+
+    # Instantiate the AOS telescope state
     state = aosTeleState(args.inst, args.simuParam, args.iSim,
                          esti.ndofA, phosimDir,
                          pertDir, imageDir, band, wavelength,
-                         args.enditer,
-                         args.debugLevel, M1M3=M1M3, M2=M2)
+                         args.enditer, args.debugLevel, M1M3=M1M3, M2=M2)
+
     # *****************************************
     # control algorithm
     # *****************************************
+
+    # Instantiate the AOS metrology and controller
     metr = aosMetric(args.inst, state.opdSize, wfs.znwcs3, args.debugLevel)
     ctrl = aosController(args.inst, args.controllerParam, esti, metr, wfs,
                          M1M3, M2,
@@ -95,68 +121,71 @@ def main():
     # *****************************************
     # start the Loop
     # *****************************************
-    for iIter in range(args.startiter, args.enditer + 1):
-        if args.debugLevel >= 3:
-            print('iteration No. %d' % iIter)
 
+    # Do the close loop simulation
+    for iIter in range(args.startiter, args.enditer + 1):
+        
+        # Show the iteration number of not
+        if (args.debugLevel >= 3):
+            print("iteration No. %d" % iIter)
+
+        # Set the telescope status in ith iteration
         state.setIterNo(metr, iIter, wfs=wfs)
 
-        if not args.ctrloff:
-            if iIter > 0:  # args.startiter:
+        if (not args.ctrloff):
+
+            # Update the telescope status
+            if (iIter > 0):
                 esti.estimate(state, wfs, ctrl, args.sensor)
                 ctrl.getMotions(esti, metr, wfs, state)
                 ctrl.drawControlPanel(esti, state)
 
-                # need to remake the pert file here.
+                # Need to remake the pert file here.
                 # It will be inserted into OPD.inst, PSF.inst later
                 state.update(ctrl, M1M3, M2)
-            if args.baserun > 0 and iIter == 0:
+
+            if (args.baserun > 0 and iIter == 0):
+                # Read the telescope status from the resetted baserun iteration
                 state.getPertFilefromBase(args.baserun)
             else:
+                # Write data into perturbation file
                 state.writePertFile(esti.ndofA, M1M3=M1M3, M2=M2)
 
-        if args.baserun > 0 and iIter == 0:
+        # Do the metrology calculation
+        if (args.baserun > 0 and iIter == 0):
             state.getOPDAllfromBase(args.baserun, metr)
             state.getPSFAllfromBase(args.baserun, metr)
             metr.getPSSNandMorefromBase(args.baserun, state)
             metr.getEllipticityfromBase(args.baserun, state)
-            if (args.sensor == 'ideal' or args.sensor == 'covM' or
-                    args.sensor == 'pass' or args.sensor == 'check'):
-                pass
-            else:
+
+            if args.sensor not in ("ideal", "covM", "pass", "check"):
                 wfs.getZ4CfromBase(args.baserun, state)
+        
         else:
             state.getOPDAll(args.opdoff, metr, args.numproc,
                             wfs.znwcs, wfs.inst.obscuration, args.debugLevel)
-
             state.getPSFAll(args.psfoff, metr, args.numproc, args.debugLevel)
+            metr.getPSSNandMore(args.pssnoff, state, args.numproc, args.debugLevel)
+            metr.getEllipticity(args.ellioff, state, args.numproc, args.debugLevel)
 
-            metr.getPSSNandMore(args.pssnoff, state,
-                                args.numproc, args.debugLevel)
+            if args.sensor not in ("ideal", "covM", "pass"):
 
-            metr.getEllipticity(args.ellioff, state,
-                                args.numproc, args.debugLevel)
-
-            if (args.sensor == 'ideal' or args.sensor == 'covM' or
-                    args.sensor == 'pass'):
-                pass
-            else:
-                if args.sensor == 'phosim':
-                    # create donuts for last iter,
-                    # so that picking up from there will be easy
+                if (args.sensor == "phosim"):
+                    # Create donuts for last iter, so that picking up from there will be easy
                     state.getWFSAll(wfs, metr, args.numproc, args.debugLevel)
                     wfs.preprocess(state, metr, args.debugLevel)
-                if args.sensor == 'phosim' or args.sensor == 'cwfs':
+
+                if args.sensor in ("phosim", "cwfs"):
                     wfs.parallelCwfs(cwfsModel, args.numproc, args.debugLevel)
-                if args.sensor == 'phosim' or args.sensor == 'cwfs' \
-                        or args.sensor == 'check':
+
+                if args.sensor in ("phosim", "cwfs", "check"):
                     wfs.checkZ4C(state, metr, args.debugLevel)
 
-    ctrl.drawSummaryPlots(state, metr, esti, M1M3, M2,
-                          args.startiter, args.enditer, args.debugLevel)
+    # Draw the summary plot
+    ctrl.drawSummaryPlots(state, metr, esti, M1M3, M2, args.startiter, args.enditer, args.debugLevel)
 
-    print('Done runnng iterations: %d to %d' % (args.startiter, args.enditer))
-    
+    # Show the finish of iteration
+    print("Done the runnng iterations: %d to %d." % (args.startiter, args.enditer))
 
 def __setParseAugs():
     """
@@ -198,7 +227,7 @@ def __setParseAugs():
                     covM: use covarance matrix to estimate wavefront;\
                     phosim: run Phosim to create WFS images;\
                     cwfs: start by running cwfs on existing images;\
-                    check: check wavefront against truth; \
+                    check: check wavefront against truth;\
                     pass: do nothing"
     parser.add_argument("-sensor", choices=sensorChoices, help=helpDescript)
 
@@ -264,7 +293,7 @@ def __setParseAugs():
     parser.add_argument("-d", dest="debugLevel", type=int, default=0, choices=debugChoices,
                         help=helpDescript)
 
-    # Do the base run or not
+    # Reset the base run as this run instead of iter0 or not
     helpDescript = "iter0 is same as this run, so skip iter0"
     parser.add_argument("-baserun", default=-1, type=int, help=helpDescript)
 
@@ -273,11 +302,20 @@ def __setParseAugs():
 
 if __name__ == "__main__":
 
+    # Output data directory
+    outputDir = "/Users/Wolf/Documents/aosOutput"
+
+    # PhoSim directory
+    phosimDir = "/Users/Wolf/Documents/bitbucket/phosim_syseng2"
+
+    # cwfs directory
+    cwfsDir = "/Users/Wolf/Documents/github/cwfs"
+
     # Get the start time
     timeStart = datetime.now().replace(microsecond=0)
     
     # Do the AOS
-    main()
+    main(phosimDir, cwfsDir, outputDir)
 
     # Get the finish time
     timeFinish = datetime.now().replace(microsecond=0)

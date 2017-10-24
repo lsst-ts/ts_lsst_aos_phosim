@@ -2,6 +2,3 @@
 *.so
 *.c
 *.o
-/image/*
-/pert/*
-/backupTestRun/*

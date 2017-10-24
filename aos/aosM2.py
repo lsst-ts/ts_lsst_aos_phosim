@@ -4,7 +4,7 @@
 # @       Large Synoptic Survey Telescope
 
 import numpy as np
-import aosCoTransform as ct
+import aos.aosCoTransform as ct
 
 
 class aosM2(object):

@@ -10,8 +10,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from astropy.io import fits
 
-from aosMetric import aosMetric
-from aosTeleState import aosTeleState
+from aos.aosMetric import aosMetric
+from aos.aosTeleState import aosTeleState
 
 from lsst.cwfs.tools import extractArray
 
