@@ -103,9 +103,8 @@ def main(phosimDir, cwfsDir, outputDir, algoFile="exp", cwfsModel="offAxis"):
                         args.izn3, args.debugLevel)
 
     # Instantiate the AOS telescope state
-    state = aosTeleState(args.inst, args.simuParam, args.iSim,
-                         esti.ndofA, phosimDir,
-                         pertDir, imageDir, band, wavelength,
+    state = aosTeleState(args.inst, args.simuParam, args.iSim, esti.ndofA, 
+                         phosimDir, pertDir, imageDir, band, wavelength,
                          args.enditer, args.debugLevel, M1M3=M1M3, M2=M2)
 
     # *****************************************
@@ -115,8 +114,7 @@ def main(phosimDir, cwfsDir, outputDir, algoFile="exp", cwfsModel="offAxis"):
     # Instantiate the AOS metrology and controller
     metr = aosMetric(args.inst, state.opdSize, wfs.znwcs3, args.debugLevel)
     ctrl = aosController(args.inst, args.controllerParam, esti, metr, wfs,
-                         M1M3, M2,
-                         effwave, args.gain, args.debugLevel)
+                         M1M3, M2, effwave, args.gain, args.debugLevel)
 
     # *****************************************
     # start the Loop
@@ -162,8 +160,8 @@ def main(phosimDir, cwfsDir, outputDir, algoFile="exp", cwfsModel="offAxis"):
                 wfs.getZ4CfromBase(args.baserun, state)
         
         else:
-            state.getOPDAll(args.opdoff, metr, args.numproc,
-                            wfs.znwcs, wfs.inst.obscuration, args.debugLevel)
+            state.getOPDAll(args.opdoff, metr, args.numproc, wfs.znwcs, wfs.inst.obscuration, 
+                            args.debugLevel)
             state.getPSFAll(args.psfoff, metr, args.numproc, args.debugLevel)
             metr.getPSSNandMore(args.pssnoff, state, args.numproc, args.debugLevel)
             metr.getEllipticity(args.ellioff, state, args.numproc, args.debugLevel)
