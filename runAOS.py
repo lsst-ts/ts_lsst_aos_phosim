@@ -18,8 +18,6 @@ from aos.aosM1M3 import aosM1M3
 from aos.aosM2 import aosM2
 from aos.aosTeleState import aosTeleState
 
-from aos.AocM1M3 import AocM1M3
-
 def main(phosimDir, cwfsDir, outputDir, algoFile="exp", cwfsModel="offAxis"):
     """
     
@@ -36,7 +34,7 @@ def main(phosimDir, cwfsDir, outputDir, algoFile="exp", cwfsModel="offAxis"):
         cwfsModel {str} -- Optical model. (default: {"offAxis"})
     """
 
-    # global M1M3, M1M3temp
+    # global M1M3, M1M3temp, M2, M2temp
 
     # Instantiate the parser for command line to use
     parser = __setParseAugs()
@@ -78,13 +76,11 @@ def main(phosimDir, cwfsDir, outputDir, algoFile="exp", cwfsModel="offAxis"):
     # *****************************************
 
     # Instantiate mirrors
-    M1M3 = aosM1M3(args.debugLevel)
+    M1M3dir = "data/M1M3"
+    M1M3 = aosM1M3(M1M3dir, debugLevel=args.debugLevel)
 
-    # M1M3dir = "data/M1M3"
-    # M1M3temp = AocM1M3(M1M3dir, debugLevel=args.debugLevel)
-    # return
-
-    M2 = aosM2(args.debugLevel)
+    M2dir = "data/M2"
+    M2 = aosM2(M2dir, debugLevel=args.debugLevel)
 
     # znPert = 28  # znmax used in pert file to define surfaces
 
