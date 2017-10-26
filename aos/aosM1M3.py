@@ -16,7 +16,7 @@ from mpl_toolkits.mplot3d import Axes3D
 
 import time
 
-class AocM1M3(object):
+class aosM1M3(object):
 
     # Outer radius of M1 mirror in m
     R = 4.180
@@ -323,7 +323,7 @@ if __name__ == "__main__":
     M1M3dir = "../data/M1M3"
 
     # Instantiate the AocM1M3
-    M1M3 = AocM1M3(M1M3dir)
+    M1M3 = aosM1M3(M1M3dir)
 
     # Calculate the print thz
     x, y, temp = ZCRS2M1CRS(M1M3.bx, M1M3.by, M1M3.bz)

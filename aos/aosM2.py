@@ -8,7 +8,7 @@ import numpy as np
 
 from aos.aosCoTransform import M2CRS2ZCRS, ZCRS2M2CRS
 
-class AocM2(object):
+class aosM2(object):
 
     # Outer radius of M2 mirror in m
     R = 1.710
