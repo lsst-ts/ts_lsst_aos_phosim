@@ -157,6 +157,9 @@ class aosM1M3(object):
         """
         
         Get the mirror print along z direction in specific zenith angle. 
+
+        It is noted that in the real condition, zenith angle is published by TMA and 
+        M1M3. And TMA is preferred to use for higher accuracy. 
         
         Arguments:
             zAngle {[float]} -- Zenith angle.

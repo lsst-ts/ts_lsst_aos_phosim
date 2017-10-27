@@ -18,7 +18,7 @@ from aos.aosM1M3 import aosM1M3
 from aos.aosM2 import aosM2
 from aos.aosTeleState import aosTeleState
 
-def main(phosimDir, cwfsDir, outputDir, algoFile="exp", cwfsModel="offAxis"):
+def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="offAxis"):
     """
     
     Run the AOS close loop code.
@@ -27,6 +27,7 @@ def main(phosimDir, cwfsDir, outputDir, algoFile="exp", cwfsModel="offAxis"):
         phosimDir {[str]} -- PhoSim directory.
         cwfsDir {[str]} -- cwfs directory.
         outputDir {[str]} -- Output files directory.
+        aosDataDir {[str]} -- AOS data directory.
     
     Keyword Arguments:
         algoFile {str} -- Algorithm to solve the transport of intensity equation (TIE). 
@@ -58,6 +59,7 @@ def main(phosimDir, cwfsDir, outputDir, algoFile="exp", cwfsModel="offAxis"):
         print(args)
 
     # Decide the wavelength in micron
+    # Need to check with Bo why this condition (0.5) is special
     if (args.wavestr == "0.5"):
         band = "g"
         wavelength = float(args.wavestr)
@@ -89,7 +91,7 @@ def main(phosimDir, cwfsDir, outputDir, algoFile="exp", cwfsModel="offAxis"):
     # *****************************************
 
     # Instantiate the AOS wavefront sensor estimator
-    wfs = aosWFS(cwfsDir, args.inst, algoFile, 128, band, effwave, args.debugLevel)
+    wfs = aosWFS(cwfsDir, args.inst, algoFile, 128, band, effwave, aosDataDir, args.debugLevel)
 
     # *****************************************
     # state estimator
@@ -179,7 +181,7 @@ def main(phosimDir, cwfsDir, outputDir, algoFile="exp", cwfsModel="offAxis"):
                     wfs.preprocess(state, metr, args.debugLevel)
 
                 if args.sensor in ("phosim", "cwfs"):
-                    wfs.parallelCwfs(cwfsModel, args.numproc, args.debugLevel)
+                    wfs.parallelCwfs(cwfsModel, args.numproc)
 
                 if args.sensor in ("phosim", "cwfs", "check"):
                     wfs.checkZ4C(state, metr, args.debugLevel)
@@ -266,7 +268,7 @@ def __setParseAugs():
     helpDescript = "override gain in the controller parameter file, default=no override"
     parser.add_argument("-g", dest="gain", default=0.7, type=float, help=helpDescript)
 
-    # Type of instrument ("lsst" or "comcam")
+    # Type of instrument ("lsst", "comcam10", "comcam15", "comcam20")
     helpDescript = "instrument name, default=lsst"
     parser.add_argument("-i", dest="inst", default="lsst", help=helpDescript)
 
@@ -314,11 +316,14 @@ if __name__ == "__main__":
     # cwfs directory
     cwfsDir = "/Users/Wolf/Documents/github/cwfs"
 
+    # AOS data directory
+    aosDataDir = "/Users/Wolf/Documents/stash/ts_lsst_aos_phosim/data"
+
     # Get the start time
     timeStart = datetime.now().replace(microsecond=0)
     
     # Do the AOS
-    main(phosimDir, cwfsDir, outputDir)
+    main(phosimDir, cwfsDir, outputDir, aosDataDir)
 
     # Get the finish time
     timeFinish = datetime.now().replace(microsecond=0)

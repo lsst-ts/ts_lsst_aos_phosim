@@ -69,7 +69,7 @@ class aosM2(object):
             zAngle {[float]} -- Zenith angle.
         
         Keyword Arguments:
-            pre_comp_elev {number} -- ??? elevation angle. (default: {0})
+            pre_comp_elev {number} -- Pre-compensation elevation angle. (default: {0})
         
         Returns:
             [float] -- Corrected projection in z direction.
@@ -79,7 +79,7 @@ class aosM2(object):
         # Map the changes of dz on a plane for certain zenith angle 
         printthz = self.zdz * np.cos(zAngle) + self.hdz * np.sin(zAngle)
         
-        # Do the elevation angle correction
+        # Do the pre-compensation elevation angle correction
         printthz -= self.zdz * np.cos(pre_comp_elev) + self.hdz * np.sin(pre_comp_elev)
         
         return printthz
