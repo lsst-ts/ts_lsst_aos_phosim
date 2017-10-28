@@ -164,7 +164,7 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
             metr.getEllipticityfromBase(args.baserun, state)
 
             if args.sensor not in ("ideal", "covM", "pass", "check"):
-                wfs.getZ4CfromBase(args.baserun, state)
+                wfs.getZ4CfromBase(args.baserun, state.iSim)
         
         else:
             state.getOPDAll(args.opdoff, metr, args.numproc, wfs.znwcs, wfs.inst.obscuration, 

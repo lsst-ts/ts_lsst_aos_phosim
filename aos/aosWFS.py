@@ -4,20 +4,17 @@
 # @       Large Synoptic Survey Telescope
 
 import os, re
-import glob
+from glob import glob
+
 import multiprocessing
-import copy
 
 import numpy as np
 from astropy.io import fits
-from scipy import ndimage
-import matplotlib.pyplot as plt
+from scipy.ndimage.measurements import center_of_mass
 
 from lsst.cwfs.algorithm import Algorithm
 from lsst.cwfs.instrument import Instrument
 from lsst.cwfs.image import Image, readFile
-
-from wep.WFEstimator import WFEstimator
 
 import matplotlib.pylab as plt
 
@@ -51,16 +48,10 @@ class aosWFS(object):
         Keyword Arguments:
             debugLevel {int} -- Debug level. The higher value gives more information.
                                 (default: {0})
-
-        Raises:
-            RuntimeError -- No instrument found.
         """
 
         # Get the instrument name
-        m = re.match(r"([a-z]+)(?:(\d+))?$", instruFile)
-        if m is None:
-             raise RuntimeError("Cannot get the instrument name: %s." % instruFile)
-        instName = m.groups()[0]
+        instName, defocalOffset = self.__getInstName(instruFile)
 
         # Declare the Zk, catalog donut, and calculated z files
         self.zFile = None
@@ -78,13 +69,6 @@ class aosWFS(object):
         self.nExp = {self.LSST: 2, self.COMCAM: 1}[instName]
 
         # Decide the defocal distance offset in mm
-        defocalOffset = m.groups()[1]
-        if (defocalOffset is not None):
-            defocalOffset = float(defocalOffset)/10
-        else:
-            # Default defocal distance is 1.5 mm
-            defocalOffset = 1.5
-
         self.offset = [-defocalOffset, defocalOffset]
 
         # Will refactorize the directory root problem.
@@ -154,175 +138,290 @@ class aosWFS(object):
             print(self.intrinsicWFS.shape)
             print(self.intrinsicWFS[:5])
 
-    def preprocess(self, state, metr, debugLevel):
+    def __getInstName(self, instruFile):
+        """
+        
+        Get the instrument name from the instrument file.
+        
+        Arguments:
+            instruFile {[str]} -- Instrument folder name.
+        
+        Returns:
+            [str] -- Instrument name.
+            [float] -- Defocal offset in mm.
+        
+        Raises:
+            RuntimeError -- No instrument found.
+        """
 
-        # Analyze the phosim data to get eight donuts
+        # Get the instrument name
+        m = re.match(r"([a-z]+)(?:(\d+))?$", instruFile)
+        if m is None:
+             raise RuntimeError("Cannot get the instrument name: %s." % instruFile)
+        instName = m.groups()[0]
 
-        for iexp in range(0, self.nExp):
+        # Decide the defocal distance offset in mm
+        defocalOffset = m.groups()[1]
+        if (defocalOffset is not None):
+            defocalOffset = float(defocalOffset)/10
+        else:
+            # Default defocal distance is 1.5 mm
+            defocalOffset = 1.5
+
+        return instName, defocalOffset
+
+    def preprocess(self, state, metr, debugLevel=0):
+        """
+        
+        Analyze the phosim images to get donuts as separate small images and related 
+        field x, y.
+        
+        Arguments:
+            state {[aosTeleState]} -- State of telescope.
+            metr {[aosMetric]} -- Metrology of telescope.
+        
+        Keyword Arguments:
+            debugLevel {int} -- Debug level. The higher value gives more information.
+                                (default: {0})
+        """
+
+        # Get the instrument name
+        instName, defocalOffset = self.__getInstName(state.inst)
+
+        for iexp in range(self.nExp):
+
             for iField in range(metr.nFieldp4 - self.nWFS, metr.nFieldp4):
-                chipStr, px0, py0 = state.fieldXY2Chip(
-                    metr.fieldXp[iField], metr.fieldYp[iField], debugLevel)
-                for ioffset in [0, 1]:
-                    if self.nRun == 1:
-                        src = glob.glob('%s/iter%d/*%d*%s*%s*E00%d.fits' %
-                                        (state.imageDir, state.iIter,
-                                            state.obsID,
-                                        chipStr, self.halfChip[ioffset], iexp))
-                    else:
-                        src = glob.glob('%s/iter%d/*%d*%s*%s*E00%d.fits' %
-                                        (state.imageDir, state.iIter,
-                                            state.obsID + ioffset,
-                                        chipStr, self.halfChip[ioffset], iexp))
-                    chipFile = src[0]
-                    chipImage, header = fits.getdata(chipFile,header=True)
 
-                    if state.inst[:4] == 'lsst':
-                        if ioffset == 0:
-                            # intra image, C0, pulled 0.02 deg from right edge
+                # Get the chip name, pixel position x, y of dunut
+                chipStr, px0, py0 = state.fieldXY2Chip(metr.fieldXp[iField], metr.fieldYp[iField], 
+                                                       debugLevel)
+
+                # Half chip ("C0", "C1") for ioffset (0, 1)
+                for ioffset in [0, 1]:
+
+                    # nRun = 1 for lsst and nRun = 2 for comcam
+                    if (self.nRun == 1):
+                        visit = state.obsID                    
+                    else:
+                        # Add the index for the comcam
+                        visit = state.obsID + ioffset
+
+                    # Get the list of paths matching the pathname pattern
+                    patheNamePattern = os.path.join(state.imageDir, "iter%d" % state.iIter, 
+                                            "*%d*%s*%s*E00%d.fits" % (visit, chipStr, self.halfChip[ioffset], iexp))
+
+                    src = glob(patheNamePattern)
+
+                    # Get the fit image and header 
+                    chipFile = src[0]
+                    chipImage, header = fits.getdata(chipFile, header=True)
+
+                    # Shift the pixel x position by 0.02 deg for lsst
+                    if (instName == self.LSST):
+
+                        if (ioffset == 0):
+                            # Intra image, C0, pulled 0.02 deg from right edge
                             # degree to micron then to pixel
                             px = int(px0 - 0.020 * 180000 / 10)
-                        elif ioffset == 1:
-                            # extra image, C1, pulled 0.02 deg away from left edge
+                        elif (ioffset == 1):
+                            # Extra image, C1, pulled 0.02 deg away from left edge
                             px = int(px0 + 0.020 * 180000 / 10 - chipImage.shape[1])
-                    elif state.inst[:6] == 'comcam':
+                    
+                    elif (instName == self.COMCAM):
                         px = px0
-                    py = copy.copy(py0)
 
-                    # psf here is 4 x the size of cwfsStampSize, to get centroid
+                    # Pixel y position keeps the same
+                    py = py0
+
+                    # Take the donut image
+                    # psf here is 4 x (size of cwfsStampSize), to get centroid
                     psf = chipImage[np.max((0, py - 2 * state.cwfsStampSize)):
                                     py + 2 * state.cwfsStampSize,
                                     np.max((0, px - 2 * state.cwfsStampSize)):
                                     px + 2 * state.cwfsStampSize]
-                    centroid = ndimage.measurements.center_of_mass(psf)
+
+                    # The method here is to assume the clean background
+                    # Need to replace here in the final
+                    centroid = center_of_mass(psf)
+
+                    # Calculate the offset between the centroid and cutted donut picture
                     offsety = centroid[0] - 2 * state.cwfsStampSize + 1
                     offsetx = centroid[1] - 2 * state.cwfsStampSize + 1
-                    # if the psf above has been cut on px=0 or py=0 side
-                    if py - 2 * state.cwfsStampSize < 0:
-                        offsety -= py - 2 * state.cwfsStampSize
-                    if px - 2 * state.cwfsStampSize < 0:
-                        offsetx -= px - 2 * state.cwfsStampSize
+                    
+                    # If the psf above has been cut on px=0 or py=0 side
+                    if (py - 2*state.cwfsStampSize < 0):
+                        offsety -= py - 2*state.cwfsStampSize
+                    
+                    if (px - 2*state.cwfsStampSize < 0):
+                        offsetx -= px - 2*state.cwfsStampSize
 
-                    psf = chipImage[
-                        int(py - state.cwfsStampSize / 2 + offsety):
-                        int(py + state.cwfsStampSize / 2 + offsety),
-                        int(px - state.cwfsStampSize / 2 + offsetx):
-                        int(px + state.cwfsStampSize / 2 + offsetx)]
+                    # Retake the donut image that the centroid of donut is in image's center
+                    psf = chipImage[int(py - state.cwfsStampSize/2 + offsety):int(py + state.cwfsStampSize/2 + offsety),
+                                    int(px - state.cwfsStampSize/2 + offsetx):int(px + state.cwfsStampSize/2 + offsetx)]
 
-                    if state.inst[:4] == 'lsst':
+                    # Take the corner images of LSST based on the correct orientation (Euler angel z)
+                    if (instName == self.LSST):
                         # readout of corner raft are identical,
                         # cwfs knows how to handle rotated images
                         # note: rot90 rotates the array,
-                        # not the image (as you see in ds9, or Matlab with
-                        #                  "axis xy")
+                        # not the image (as you see in ds9, or Matlab with "axis xy")
                         # that is why we need to flipud and then flip back
-                        if iField == metr.nField:
+                        if (iField == metr.nField):
                             psf = np.flipud(np.rot90(np.flipud(psf), 2))
-                        elif iField == metr.nField + 1:
+                        
+                        elif (iField == metr.nField+1):
                             psf = np.flipud(np.rot90(np.flipud(psf), 3))
-                        elif iField == metr.nField + 3:
+                        
+                        elif (iField == metr.nField+3):
                             psf = np.flipud(np.rot90(np.flipud(psf), 1))
 
-                    # below, we have 0 b/c we may have many
-                    stampFile = '%s/iter%d/sim%d_iter%d_wfs%d_%s_0_E00%d.fits' % (
-                        state.imageDir, state.iIter, state.iSim, state.iIter,
-                        iField, self.wfsName[ioffset], iexp)
+                    # Below, we have "0" in the front of "E00" b/c we may have many donuts in the future
+                    # Hard coded the "0" here. It should be removed in the future.
+                    stampFile = os.path.join(state.imageDir, "iter%d" % state.iIter, 
+                                    "sim%d_iter%d_wfs%d_%s_0_E00%d.fits" % (state.iSim, state.iIter, iField, 
+                                                                            self.wfsName[ioffset], iexp))
+
+                    # Delete the existed file if necessary               
                     if os.path.isfile(stampFile):
                         os.remove(stampFile)
+                    
+                    # Declare a header data unit and write the "psf" image into the file (stamp file)
                     hdu = fits.PrimaryHDU(psf)
                     hdu.writeto(stampFile)
 
+                    # Write the atomosphere data into the file
                     if ((iField == metr.nFieldp4 - self.nWFS) and (ioffset == 0)):
-                        fid = open(state.atmFile[iexp], 'w')
-                        fid.write('Layer# \t seeing \t L0 \t\t wind_v \t wind_dir\n')
+                        
+                        fid = open(state.atmFile[iexp], "w")
+                        fid.write("Layer# \t seeing \t L0 \t\t wind_v \t wind_dir\n")
+                        
+                        # Severn layers of atmosphere
                         for ilayer in range(7):
-                            fid.write('%d \t %.6f \t %.5f \t %.6f \t %.6f\n'%(
-                                ilayer,header['SEE%d'%ilayer],
-                                header['OSCL%d'%ilayer],
-                                header['WIND%d'%ilayer],
-                                header['WDIR%d'%ilayer]))
+                            fid.write("%d \t %.6f \t %.5f \t %.6f \t %.6f\n" % (ilayer, 
+                                        header["SEE%d" % ilayer], header["OSCL%d" % ilayer],
+                                        header["WIND%d" % ilayer], header["WDIR%d" % ilayer]))
+                        
                         fid.close()
 
-                    if debugLevel >= 3:
-                        print('px = %d, py = %d' % (px, py))
-                        print('offsetx = %d, offsety = %d' % (offsetx, offsety))
-                        print('passed %d, %s' % (iField, self.wfsName[ioffset]))
+                    # Show the information for the debug
+                    if (debugLevel >= 3):
+                        print("px = %d, py = %d" % (px, py))
+                        print("offsetx = %d, offsety = %d" % (offsetx, offsety))
+                        print("passed %d, %s" % (iField, self.wfsName[ioffset]))
 
-            # make an image of the 8 donuts
-            for iField in range(metr.nFieldp4 - self.nWFS, metr.nFieldp4):
-                chipStr, px, py = state.fieldXY2Chip(
-                    metr.fieldXp[iField], metr.fieldYp[iField], debugLevel)
+            # Make an image of the 8 donuts
+            for iField in range(metr.nFieldp4-self.nWFS, metr.nFieldp4):
+
+                # Get the chip name, pixel position x, y of dunut
+                chipStr, px, py = state.fieldXY2Chip(metr.fieldXp[iField], metr.fieldYp[iField], debugLevel)
+                
+                # Plot C0 and C1 images
                 for ioffset in [0, 1]:
-                    src = glob.glob('%s/iter%d/sim%d_iter%d_wfs%d_%s_*E00%d.fits' % (
-                        state.imageDir, state.iIter, state.iSim, state.iIter,
-                        iField, self.wfsName[ioffset], iexp))
+                    
+                    # Define the pattern of name
+                    patheNamePattern = os.path.join(state.imageDir, "iter%d" % state.iIter, 
+                        "sim%d_iter%d_wfs%d_%s_*E00%d.fits" % (state.iSim, state.iIter, iField, 
+                                                               self.wfsName[ioffset], iexp))
+
+                    # Get the file list
+                    src = glob(patheNamePattern)
+                    
+                    # Open the image fits file
                     IHDU = fits.open(src[0])
+
+                    # Get the image data
                     psf = IHDU[0].data
+
+                    # Close the image fits file
                     IHDU.close()
-                    if state.inst[:4] == 'lsst':
+                    
+                    # Arrange the donut images to a single figure
+                    if (instName == self.LSST):
+                        
                         nRow = 2
                         nCol = 4
-                        if iField == metr.nField:
-                            pIdx = 3 + ioffset  # 3 and 4
-                        elif iField == metr.nField + 1:
-                            pIdx = 1 + ioffset  # 1 and 2
-                        elif iField == metr.nField + 2:
-                            pIdx = 5 + ioffset  # 5 and 6
-                        elif iField == metr.nField + 3:
-                            pIdx = 7 + ioffset  # 7 and 8
-                    elif state.inst[:6] == 'comcam':
+                        
+                        if (iField == metr.nField):
+                            # 3 and 4
+                            pIdx = 3 + ioffset
+                        elif (iField == metr.nField + 1):
+                            # 1 and 2
+                            pIdx = 1 + ioffset  
+                        elif (iField == metr.nField + 2):
+                            # 5 and 6
+                            pIdx = 5 + ioffset  
+                        elif (iField == metr.nField + 3):
+                            # 7 and 8
+                            pIdx = 7 + ioffset  
+                    
+                    elif (instName == self.COMCAM):
+
                         nRow = 3
                         nCol = 6
+                        
                         ic = np.floor(iField / nRow)
                         ir = iField % nRow
+                        
                         # does iField=0 give 13 and 14?
-                        pIdx = int((nRow - ir - 1) * nCol + ic * 2 + 1 + ioffset)
+                        pIdx = int((nRow - ir - 1) * nCol + ic * 2 + 1 + ioffset)     
                         # print('pIdx = %d, chipStr= %s'%(pIdx, chipStr))
+                   
                     plt.subplot(nRow, nCol, pIdx)
-                    plt.imshow(psf, origin='lower', interpolation='none')
-                    plt.title('%s_%s' %
-                              (chipStr, self.wfsName[ioffset]), fontsize=10)
-                    plt.axis('off')
+                    plt.imshow(psf, origin="lower", interpolation="none")
+                    plt.title("%s_%s" % (chipStr, self.wfsName[ioffset]), fontsize=10)
+                    plt.axis("off")
 
-            # plt.show()
-            pngFile = '%s/iter%d/sim%d_iter%d_wfs_E00%d.png' % (
-                state.imageDir, state.iIter, state.iSim, state.iIter, iexp)
-            plt.savefig(pngFile, bbox_inches='tight')
+            # Give the file name
+            pngFile = os.path.join(state.imageDir, "iter%d" % state.iIter, 
+                                   "sim%d_iter%d_wfs_E00%d.png" % (state.iSim, state.iIter, iexp))
+            # Save the image to the file
+            plt.savefig(pngFile, bbox_inches="tight")
 
-            # write out catalog for good wfs stars
-            fid = open(self.catFile[iexp], 'w')
-            for i in range(metr.nFieldp4 - self.nWFS, metr.nFieldp4):
-                intraFile = glob.glob('%s/iter%d/sim%d_iter%d_wfs%d_%s_*E00%d.fits' % (
-                    state.imageDir, state.iIter, state.iSim, state.iIter, i,
-                    self.wfsName[0], iexp))[0]
-                extraFile = glob.glob('%s/iter%d/sim%d_iter%d_wfs%d_%s_*E00%d.fits' % (
-                    state.imageDir, state.iIter, state.iSim, state.iIter, i,
-                    self.wfsName[1], iexp))[0]
-                if state.inst[:4] == 'lsst':
-                    if i == 31:
-                        fid.write('%9.6f %9.6f %9.6f %9.6f %s %s\n' % (
-                            metr.fieldXp[i] - 0.020, metr.fieldYp[i],
-                            metr.fieldXp[i] + 0.020, metr.fieldYp[i],
-                            intraFile, extraFile))
-                    elif i == 32:
-                        fid.write('%9.6f %9.6f %9.6f %9.6f %s %s\n' % (
-                            metr.fieldXp[i], metr.fieldYp[i] - 0.020,
-                            metr.fieldXp[i], metr.fieldYp[i] + 0.020,
-                            intraFile, extraFile))
-                    elif i == 33:
-                        fid.write('%9.6f %9.6f %9.6f %9.6f %s %s\n' % (
-                            metr.fieldXp[i] + 0.020, metr.fieldYp[i],
-                            metr.fieldXp[i] - 0.020, metr.fieldYp[i],
-                            intraFile, extraFile))
-                    elif i == 34:
-                        fid.write('%9.6f %9.6f %9.6f %9.6f %s %s\n' % (
-                            metr.fieldXp[i], metr.fieldYp[i] + 0.020,
-                            metr.fieldXp[i], metr.fieldYp[i] - 0.020,
-                            intraFile, extraFile))
-                elif state.inst[:6] == 'comcam':
-                    fid.write('%9.6f %9.6f %9.6f %9.6f %s %s\n' % (
-                        metr.fieldXp[i], metr.fieldYp[i],
-                        metr.fieldXp[i], metr.fieldYp[i],
-                        intraFile, extraFile))
+            # Write out the catalog for good wfs stars (field x, y and the donut image file path)
+            fid = open(self.catFile[iexp], "w")
+            for ii in range(metr.nFieldp4-self.nWFS, metr.nFieldp4):
+
+                # Get the intra- and extra-focal image file names
+                fileName = lambda x: glob(os.path.join(state.imageDir, "iter%d" % state.iIter, 
+                                          "sim%d_iter%d_wfs%d_%s_*E00%d.fits" % (state.iSim, 
+                                            state.iIter, ii, self.wfsName[x], iexp)))[0]
+                intraFile = fileName(0)
+                extraFile = fileName(1)
+                
+                # Write the information into the file
+                intraFieldX = metr.fieldXp[ii]
+                intraFieldY = metr.fieldYp[ii]
+
+                extraFieldX = intraFieldX
+                extraFieldY = intraFieldY
+
+                # The corner WFS has the Euler z = 90 degree rotation in LSST
+                if (instName == self.LSST):
+
+                    delta = 0.02
+                    if (ii == 31):
+
+                        intraFieldX -= delta
+                        extraFieldX += delta
+
+                    elif (ii == 32):
+
+                        intraFieldY -= delta
+                        extraFieldY += delta
+
+                    elif (ii == 33):
+
+                        intraFieldX += delta
+                        extraFieldX -= delta
+
+                    elif (ii == 34):
+
+                        intraFieldY += delta
+                        extraFieldY -= delta
+
+                fid.write("%9.6f %9.6f %9.6f %9.6f %s %s\n" % (intraFieldX, intraFieldY, 
+                                        extraFieldX, extraFieldY, intraFile, extraFile))
+
             fid.close()
 
     def parallelCwfs(self, cwfsModel, numproc, writeToFile=True):
@@ -380,69 +479,151 @@ class aosWFS(object):
                 print(zcarray)
 
 
-    def checkZ4C(self, state, metr, debugLevel):
-        z4c = np.loadtxt(self.zFile[0])  # in micron
-        z4cE001 = np.loadtxt(self.zFile[1])
-        z4cTrue = np.zeros((metr.nFieldp4, self.znwcs, state.nOPDw))
-        aa = np.loadtxt(state.zTrueFile)
-        for i in range(state.nOPDw):
-            z4cTrue[:, :, i] = aa[i*metr.nFieldp4:(i+1)*metr.nFieldp4, :]
+    def checkZ4C(self, state, metr, debugLevel=0, writeToFile=True):
+        """
+        
+        Compare the calculated wavefront error with the truth based on the optical path difference 
+        (OPD) in the annular Zernike polynomials.
+        
+        Arguments:
+            state {[aosTeleState]} -- State of telescope.
+            metr {[aosMetric]} -- Metrology of telescope.
+        
+        Keyword Arguments:
+            debugLevel {int} -- Debug level. The higher value gives more information.
+                                (default: {0})
+            writeToFile {bool} -- Write the calculated result into the file or not. 
+                                  (default: {True})
+        """
 
-        x = range(4, self.znwcs + 1)
+        # Read the calculated Zk file, the unit of Zk is um
+        # Exposure 0
+        z4c = np.loadtxt(self.zFile[0])
+        
+        # Exposure 1 --> Need tp check with Bo. For the ComCam, this file should not exist.
+        z4cE001 = np.loadtxt(self.zFile[1])
+        
+        # Read the Zk truth file based on the fitting of OPD from PhoSim
+        z4cTrue = np.zeros((metr.nFieldp4, self.znwcs, state.nOPDw))
+        data = np.loadtxt(state.zTrueFile)
+        for ii in range(state.nOPDw):
+            z4cTrue[:, :, ii] = data[ii*metr.nFieldp4:(ii + 1)*metr.nFieldp4, :]
+
+        # Get the instrument name
+        instName, defocalOffset = self.__getInstName(state.inst)
+
+        # Set the size of figure as 10 inch by 8 inch
         plt.figure(figsize=(10, 8))
-        if state.inst[:4] == 'lsst':
-            # subplots go like this
+
+        # Arrange the row, column, wavefront sensor  
+        if (instName == self.LSST):
+            # Subplots go like this
             #  2 1
             #  3 4
             pIdx = [2, 1, 3, 4]
+
             nRow = 2
             nCol = 2
-        elif state.inst[:6] == 'comcam':
+
+        elif (instName == self.COMCAM):
+            # Subplots go like this
+            #  7 4 1
+            #  8 5 2
+            #  9 6 3
             pIdx = [7, 4, 1, 8, 5, 2, 9, 6, 3]
+            
             nRow = 3
             nCol = 3
 
-        for i in range(self.nWFS):
-            chipStr, px, py = state.fieldXY2Chip(
-                metr.fieldXp[i + metr.nFieldp4 - self.nWFS],
-                metr.fieldYp[i + metr.nFieldp4 - self.nWFS], debugLevel)
-            plt.subplot(nRow, nCol, pIdx[i])
-            plt.plot(x, z4c[i, :self.znwcs3], label='CWFS_E000',
-                     marker='*', color='r', markersize=6)
-            plt.plot(x, z4cE001[i, :self.znwcs3], label='CWFS_E001',
-                     marker='v', color='g', markersize=6)
+        # Label of the Zk term (z4-zn)
+        x = range(4, self.znwcs + 1)
+
+        # Plot the figure of each WFS
+        for ii in range(self.nWFS):
+
+            # Get the chip name and pixel positions of donuts
+            chipStr, px, py = state.fieldXY2Chip(metr.fieldXp[ii + metr.nFieldp4 - self.nWFS],
+                                                 metr.fieldYp[ii + metr.nFieldp4 - self.nWFS], 
+                                                 debugLevel)
+            
+            # Subplot of the figure
+            plt.subplot(nRow, nCol, pIdx[ii])
+            plt.plot(x, z4c[ii, :self.znwcs3], label="CWFS_E000", marker="*", color="r", markersize=6)
+            plt.plot(x, z4cE001[ii, :self.znwcs3], label="CWFS_E001", marker="v", color="g", markersize=6)
+            
+            # Plot the true Zk based on the OPD
             for irun in range(state.nOPDw):
-                if irun==0:
-                    mylabel = 'Truth'
-                else:
-                    mylabel = ''
-                plt.plot(x, z4cTrue[i + metr.nFieldp4 - self.nWFS, 3:self.znwcs,
-                                        irun],
-                             label=mylabel,
-                        marker='.', color='b', markersize=10)
-            if ((state.inst[:4] == 'lsst' and (i == 1 or i == 2)) or
-                    (state.inst[:6] == 'comcam' and (i <= 2))):
-                plt.ylabel('$\mu$m')
-            if ((state.inst[:4] == 'lsst' and (i == 2 or i == 3)) or
-                    (state.inst[:6] == 'comcam' and (i % nRow == 0))):
-                plt.xlabel('Zernike Index')
+                
+                # Title name
+                mylabel = "Truth" if irun==0 else ""
+
+                plt.plot(x, z4cTrue[ii + metr.nFieldp4 - self.nWFS, 3:self.znwcs, irun],
+                         label=mylabel, marker=".", color="b", markersize=10)
+            
+            # Selected label x-axis and y-axis. The labels are only at the left and bottom of figure 
+            if ((instName == self.LSST and ii in (1, 2)) or (instName == self.COMCAM and (ii <= 2))):
+                plt.ylabel("$\mu$m")
+            
+            if ((instName == self.LSST and ii in (2, 3)) or (instName == self.COMCAM and (ii % nRow == 0))):
+                plt.xlabel("Zernike Index")
+            
+            # Put the legend
             leg = plt.legend(loc="best")
             leg.get_frame().set_alpha(0.5)
+            
+            # Put the grid
             plt.grid()
+
+            # Give the title
             plt.title('Zernikes %s' % chipStr, fontsize=10)
 
-        plt.savefig(self.zCompFile, bbox_inches='tight')
+        # Write the image to file or not
+        if (writeToFile):
+            plt.savefig(self.zCompFile, bbox_inches='tight')
+        else:
+            plt.show()
 
-    def getZ4CfromBase(self, baserun, state):
+    def getZ4CfromBase(self, baserun, stateSimNum):
+        """
+        
+        Construct the zFile and zCompFile files by hard-linking to the related files in 
+        the indicated base run.
+        
+        Arguments:
+            baserun {[int]} -- Indicated simulation number.
+            stateSimNum {[int]} -- Telescope simulation number.
+        """
+
+        # Get Zk from the specific file which is assigned as a base run (iter0)
         for iexp in range(self.nExp):
+    
             if not os.path.isfile(self.zFile[iexp]):
-                baseFile = self.zFile[iexp].replace(
-                    'sim%d' % state.iSim, 'sim%d' % baserun)
-                os.link(baseFile, self.zFile[iexp])
+
+                # Hard link the file to avoid the repeated calculation
+                self.__hardLinkFile(self.zFile[iexp], baserun, stateSimNum)
+    
         if not os.path.isfile(self.zCompFile):
-            baseFile = self.zCompFile.replace(
-                'sim%d' % state.iSim, 'sim%d' % baserun)
-            os.link(baseFile, self.zCompFile)
+
+            # Hard link the file to avoid the repeated calculation
+            self.__hardLinkFile(self.zCompFile, baserun, stateSimNum)
+
+    def __hardLinkFile(self, targetFilePath, sourceNum, targetNum):
+        """
+        
+        Hard link the past calculation result instead of repeated calculation.
+        
+        Arguments:
+            targetFilePath {[str]} -- Path of file that is intended to do the hard link 
+                                      with the previous result.
+            sourceNum {[int]} -- Source simulation number.
+            targetNum {[int]} -- Target simulation number.
+        """
+
+        # Get the path of base run file by changing the simulation number
+        sourceFilePath = targetFilePath.replace("sim%d" % targetNum, "sim%d" % sourceNum)
+
+        # Construct a hard link
+        os.link(sourceFilePath, targetFilePath)
 
 def runcwfs(argList):
     """
@@ -483,41 +664,6 @@ def runcwfs(argList):
 
     return np.append(algo.zer4UpNm * 1e-3, algo.caustic)
 
-# def runcwfsTemp(argList):
-
-#     # Needed information
-#     I1File = argList[0]
-#     I1Field = argList[1]
-
-#     I2File = argList[2]
-#     I2Field = argList[3]
-
-#     inst = argList[4]
-#     algo = argList[5]
-
-#     model = argList[6]
-
-#     # Instantiate the WFEstimator
-#     instruFolderPath = "/Users/Wolf/Documents/stash/ts_tcs_wep/instruData"
-#     algoFolderPath = "/Users/Wolf/Documents/stash/ts_tcs_wep/algo"
-#     wfsEst = WFEstimator(instruFolderPath, algoFolderPath)
-
-#     # Set the image
-#     wfsEst.setImg(I1Field, imageFile=I1File, defocalType="intra")
-#     wfsEst.setImg(I2Field, imageFile=I2File, defocalType="extra")
-
-#     # Set the configuration
-#     wfsEst.config(solver=algo, instName=inst, opticalModel=model)
-
-#     # Do the calculation
-#     zer4UpNm = wfsEst.calWfsErr()
-
-#     # Return the value in the unit of um
-#     algoCaustic = {"True": 1, "False": 0}[str(wfsEst.algo.caustic)]
-
-#     return np.append(zer4UpNm*1e-3, algoCaustic)
-
-
 if __name__ == "__main__":
 
     # cwfs directory
@@ -532,17 +678,20 @@ if __name__ == "__main__":
     # Data position
     pertDir = "/Users/Wolf/Documents/aosOutput/pert/sim2"
     iIter = 0
+    
+    # Set the catalog file for locating donut images and related field x, y 
     catFile = ["%s/iter%d/wfs_catalog_E00%d.txt" % (pertDir, iIter, iexp) for iexp in [0, 1]]
 
     # Instantiate the AOS wavefront sensor estimator
     wfs = aosWFS(cwfsDir, "lsst", "exp", 128, "g", 0.5, aosDataDir, debugLevel=0)
 
-    # Set the cat file
+    # Set the catalog file
     wfs.catFile = catFile
 
     # Calculate the wavefront error
-    t0 = time.time()
-    wfs.parallelCwfs(cwfsModel, 2, writeToFile=False)
-    t1 = time.time()
-    print(t1-t0)
+    # t0 = time.time()
+    # wfs.parallelCwfs(cwfsModel, 2, writeToFile=False)
+    # t1 = time.time()
+    # print(t1-t0)
+
 
