@@ -3,7 +3,7 @@
 # @authors: Bo Xin
 # @       Large Synoptic Survey Telescope
 
-import os
+import os, re
 import sys
 import multiprocessing
 
@@ -802,3 +802,35 @@ def runFFTPSF(argList):
         os.remove(psfFile)
     hdu = fits.PrimaryHDU(psf)
     hdu.writeto(psfFile)
+
+def getInstName(instruFile):
+    """
+    
+    Get the instrument name from the instrument file.
+    
+    Arguments:
+        instruFile {[str]} -- Instrument folder name.
+    
+    Returns:
+        [str] -- Instrument name.
+        [float] -- Defocal offset in mm.
+    
+    Raises:
+        RuntimeError -- No instrument found.
+    """
+
+    # Get the instrument name
+    m = re.match(r"([a-z]+)(?:(\d+))?$", instruFile)
+    if m is None:
+         raise RuntimeError("Cannot get the instrument name: %s." % instruFile)
+    instName = m.groups()[0]
+
+    # Decide the defocal distance offset in mm
+    defocalOffset = m.groups()[1]
+    if (defocalOffset is not None):
+        defocalOffset = float(defocalOffset)/10
+    else:
+        # Default defocal distance is 1.5 mm
+        defocalOffset = 1.5
+
+    return instName, defocalOffset

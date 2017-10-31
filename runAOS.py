@@ -35,7 +35,7 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
         cwfsModel {str} -- Optical model. (default: {"offAxis"})
     """
 
-    # global M1M3, M1M3temp, M2, M2temp
+    # global esti
 
     # Instantiate the parser for command line to use
     parser = __setParseAugs()
@@ -106,8 +106,11 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
     imageDir = os.path.join(outputDir, "image", simDirName)
 
     # Instantiate the AOS estimator
-    esti = aosEstimator(args.inst, args.estimatorParam, wfs, args.icomp,
+    estiDir = "data"
+    esti = aosEstimator(estiDir, args.estimatorParam, args.inst, wfs, args.icomp, 
                         args.izn3, args.debugLevel)
+
+    # return
 
     # Instantiate the AOS telescope state
     state = aosTeleState(args.inst, args.simuParam, args.iSim, esti.ndofA, 

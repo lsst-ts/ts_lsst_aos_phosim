@@ -3,7 +3,7 @@
 # @authors: Bo Xin
 # @       Large Synoptic Survey Telescope
 
-import os, re
+import os
 from glob import glob
 
 import multiprocessing
@@ -15,6 +15,8 @@ from scipy.ndimage.measurements import center_of_mass
 from lsst.cwfs.algorithm import Algorithm
 from lsst.cwfs.instrument import Instrument
 from lsst.cwfs.image import Image, readFile
+
+from aos.aosMetric import getInstName
 
 import matplotlib.pylab as plt
 
@@ -51,7 +53,7 @@ class aosWFS(object):
         """
 
         # Get the instrument name
-        instName, defocalOffset = self.__getInstName(instruFile)
+        instName, defocalOffset = getInstName(instruFile)
 
         # Declare the Zk, catalog donut, and calculated z files
         self.zFile = None
@@ -138,38 +140,6 @@ class aosWFS(object):
             print(self.intrinsicWFS.shape)
             print(self.intrinsicWFS[:5])
 
-    def __getInstName(self, instruFile):
-        """
-        
-        Get the instrument name from the instrument file.
-        
-        Arguments:
-            instruFile {[str]} -- Instrument folder name.
-        
-        Returns:
-            [str] -- Instrument name.
-            [float] -- Defocal offset in mm.
-        
-        Raises:
-            RuntimeError -- No instrument found.
-        """
-
-        # Get the instrument name
-        m = re.match(r"([a-z]+)(?:(\d+))?$", instruFile)
-        if m is None:
-             raise RuntimeError("Cannot get the instrument name: %s." % instruFile)
-        instName = m.groups()[0]
-
-        # Decide the defocal distance offset in mm
-        defocalOffset = m.groups()[1]
-        if (defocalOffset is not None):
-            defocalOffset = float(defocalOffset)/10
-        else:
-            # Default defocal distance is 1.5 mm
-            defocalOffset = 1.5
-
-        return instName, defocalOffset
-
     def preprocess(self, state, metr, debugLevel=0):
         """
         
@@ -186,7 +156,7 @@ class aosWFS(object):
         """
 
         # Get the instrument name
-        instName, defocalOffset = self.__getInstName(state.inst)
+        instName, defocalOffset = getInstName(state.inst)
 
         for iexp in range(self.nExp):
 
@@ -510,7 +480,7 @@ class aosWFS(object):
             z4cTrue[:, :, ii] = data[ii*metr.nFieldp4:(ii + 1)*metr.nFieldp4, :]
 
         # Get the instrument name
-        instName, defocalOffset = self.__getInstName(state.inst)
+        instName, defocalOffset = getInstName(state.inst)
 
         # Set the size of figure as 10 inch by 8 inch
         plt.figure(figsize=(10, 8))
