@@ -35,6 +35,8 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
         cwfsModel {str} -- Optical model. (default: {"offAxis"})
     """
 
+    global ctrl, M1M3, M2, esti, metr
+
     # Instantiate the parser for command line to use
     parser = __setParseAugs()
 
@@ -76,10 +78,12 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
     # *****************************************
 
     # Instantiate mirrors
-    M1M3dir = "data/M1M3"
+    M1M3dir = os.path.join(aosDataDir, "M1M3")
+    # M1M3dir = "data/M1M3"
     M1M3 = aosM1M3(M1M3dir, debugLevel=args.debugLevel)
 
-    M2dir = "data/M2"
+    M2dir = os.path.join(aosDataDir, "M2")
+    # M2dir = "data/M2"
     M2 = aosM2(M2dir, debugLevel=args.debugLevel)
 
     # znPert = 28  # znmax used in pert file to define surfaces
@@ -104,8 +108,7 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
     imageDir = os.path.join(outputDir, "image", simDirName)
 
     # Instantiate the AOS estimator
-    estiDir = "data"
-    esti = aosEstimator(estiDir, args.estimatorParam, args.inst, wfs, args.icomp, 
+    esti = aosEstimator(aosDataDir, args.estimatorParam, args.inst, wfs, args.icomp, 
                         args.izn3, args.debugLevel)
 
     # Instantiate the AOS telescope state
@@ -119,8 +122,10 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
 
     # Instantiate the AOS metrology and controller
     metr = aosMetric(args.inst, state.opdSize, wfs.znwcs3, args.debugLevel)
-    ctrl = aosController(args.inst, args.controllerParam, esti, metr, wfs,
-                         M1M3, M2, effwave, args.gain, args.debugLevel)
+    ctrl = aosController(aosDataDir, args.inst, args.controllerParam, esti, metr, wfs,
+                         M1M3.force, M2.force, effwave, args.gain, args.debugLevel)
+
+    return
 
     # *****************************************
     # start the Loop

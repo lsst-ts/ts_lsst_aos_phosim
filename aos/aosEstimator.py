@@ -305,6 +305,9 @@ class aosEstimator(object):
             authority {[ndarray]} -- Authority array for each DOF.
         """
 
+        # Check with Bo the reason to normalize A based on the authority.
+        # This does not make sense to me.
+
         # Get the freedom of changing the value/ motion of degree of freedom (DOF).
         # The authority means how easy or difficult to change the related DOF.
         # This is why to take the inverse of authority here.
