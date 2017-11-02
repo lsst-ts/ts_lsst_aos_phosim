@@ -46,6 +46,8 @@ class aosEstimator(object):
         self.dofIdx = None
         self.zn3Idx = None
 
+        self.dofUnit = None
+
         # Read the file to get the parameters
         self.__readFile(self.filename, icomp, izn3)
 
@@ -59,6 +61,9 @@ class aosEstimator(object):
         # Construct the estimation of degree of freedom (x hat)
         # xhat = A.T * (A A.T)^(-1) * y
         self.xhat = np.zeros(self.ndofA)
+
+        self.yfinal = None
+        self.yresi = None
 
         # Get the instrument name
         instName, defocalOffset = getInstName(instruFile)
@@ -138,16 +143,25 @@ class aosEstimator(object):
             X = np.diag(dX)
 
             if (self.strategy == "opti"):
+
+                # A^(-1) = X * A.T * ( A * X * A.T + M )^(-1)
+                # Not understand here. Check with Bo.
                 self.Ainv = X.dot(self.Anorm.T).dot(np.linalg.pinv(self.Anorm.dot(X).dot(self.Anorm.T) + wfs.covM))
             
             elif (self.strategy == "kalman"):
+
+                # Not understand here. Check with Bo for the paper or this method.
                 self.P = np.zeros((self.ndofA, self.ndofA))
                 self.Q = X
                 self.R = wfs.covM*100
                 
         elif (self.strategy == "crude_opti"):
+            # A^(-1) = A.T * (A * A.T + perturbation * I)^(-1)
+            # This perturbation looks like to remove the problem of near-degeneracy.
+            # Need to check with Bo for the performance.
+            # There is the left/ right inverse problems here.
             self.Ainv = self.Anorm.T.dot(np.linalg.pinv(self.Anorm.dot(self.Anorm.T) + 
-                        self.reguMu * np.identity(self.Anorm.shape[0])))
+                            self.reguMu * np.identity(self.Anorm.shape[0])))
 
     def __readFile(self, filePath, icomp, izn3):
         """
@@ -282,85 +296,185 @@ class aosEstimator(object):
 
         return readIdx, data
             
-    def normA(self, ctrl):
-        self.dofUnit = 1 / ctrl.Authority
-        dofUnitMat = np.repeat(self.dofUnit.reshape(
-            (1, -1)), self.Ause.shape[0], axis=0)
+    def normA(self, authority):
+        """
+        
+        Normalize the sensitivity matrix A based on the authority of each degree of freedom (DOF).
+        
+        Arguments:
+            authority {[ndarray]} -- Authority array for each DOF.
+        """
 
-        self.Anorm = self.Ause / dofUnitMat
+        # Get the freedom of changing the value/ motion of degree of freedom (DOF).
+        # The authority means how easy or difficult to change the related DOF.
+        # This is why to take the inverse of authority here.
+        # Replace the self.dofUnit by self.authority or get rid of it in the final
+        self.dofUnit = 1/authority
+        
+        # Normalize the element of A based on the level of authority
+        # The dimension of Ause is n x m. The authority array is 1 x m after the reshape.
+        # Numpy supports this statement for matrix element multiplication.
+        self.Anorm = self.Ause * authority.reshape((1, -1))
+
+        # Get the pseudo-inversed sensitivity matrix A with the truncation
         self.Ainv = pinv_truncate(self.Anorm, self.nSingularInf)
 
-    def optiAinv(self, ctrl, wfs):
-        dX = (ctrl.range * self.fmotion)**2
+    def optiAinv(self, ctrlRange, covM):
+        """
+        
+        Construct the pseudo-inversed sensitivity matrix A in the stratege of opti.esti with the fmotion 
+        that is greater than zero.  
+        
+        Arguments:
+            ctrlRange {[ndarray]} -- Range of controller for each degree of freedom.
+            covM {[ndarray]} -- Covariance matrix of wavefront sensor.
+        """
+
+        # Not understand why we need to construct a new Ainv matrix here which is different with
+        # the Ainv in the ini function. Check with Bo for this.
+
+        # Construct the X matrix
+        # Not understand the idea here. Check with Bo.
+        dX = (ctrlRange * self.fmotion)**2
         X = np.diag(dX)
-        self.Ainv = X.dot(self.Anorm.T).dot(
-            np.linalg.pinv(self.Anorm.dot(X).dot(self.Anorm.T) + wfs.covM))
 
-    def estimate(self, state, wfs, ctrl, sensor):
-        if sensor == 'ideal' or sensor == 'covM':
-            bb = np.zeros((wfs.znwcs, state.nOPDw))
-            if state.nOPDw == 1:
-                aa = np.loadtxt(state.zTrueFile_m1)
-                self.yfinal = aa[-wfs.nWFS:, 3:self.znMax].reshape((-1, 1))
+        # A^(-1) = X * A.T * ( A * X * A.T + M )^(-1)
+        # Not understand here. Check with Bo.
+        self.Ainv = X.dot(self.Anorm.T).dot(np.linalg.pinv(self.Anorm.dot(X).dot(self.Anorm.T) + covM))
+
+    def estimate(self, state, wfs, ctrlY2File, sensor, authority=None):
+        """
+        
+        Estimate the degree of freedom by "x^{hat} = pinv(A) * y". A is the sensitivity matrix 
+        and y is the annular Zernike polynomials.
+        
+        Arguments:
+            state {[aosTeleState]} -- AOS telescope state object.
+            wfs {[aosWFS]} -- AOS wavefront sensor object.
+            ctrlY2File {[str]} -- AOS controller y2 file of specific instrument.
+            sensor {[str]} -- Wavefront sensor type ("ideal", "covM", "phosim", "cwfs", "check", "pass").
+        
+        Keyword Arguments:
+            authority {[ndarray]} -- Authority array for each DOF. (default: {None})
+        """
+
+        # Get z4-zk and put as y. This data is needed in "x = pinv(A) * y".
+        if sensor in ("ideal",  "covM"):
+
+            if (state.nOPDw == 1):
+                
+                # Read the file of true z4-zk based on the OPD om the previous iteration
+                data = np.loadtxt(state.zTrueFile_m1)
+
+                # We only need z4-zk.
+                self.yfinal = data[-wfs.nWFS:, 3:self.znMax].reshape((-1, 1))
+
             else:
-                for irun in range(state.nOPDw):
-                    aa = np.loadtxt(state.zTrueFile_m1.replace('.zer','_w%d.zer'%irun))
-                    bb[:, irun] = aa[-wfs.nWFS:, 3:self.znMax].reshape((-1, 1))
-                self.yfinal = np.sum(aosTeleState.GQwt * bb)
-            if sensor == 'covM':
-                mu = np.zeros(self.zn3Max * 4)
-                np.random.seed(state.obsID)
-                self.yfinal += np.random.multivariate_normal(
-                    mu, wfs.covM).reshape(-1, 1)
-        else:
-            aa = np.loadtxt(wfs.zFile_m1[0]) #[0] for exp No. 0
-            self.yfinal = aa[:, :self.zn3Max].reshape((-1, 1))
 
+                # Collect all z4-zk in the specific band defined in GQwt.
+                # Check will Bo for this.
+                bb = np.zeros((wfs.znwcs, state.nOPDw))
+
+                for irun in range(state.nOPDw):
+
+                    # Load the data in single run of specific band
+                    data = np.loadtxt(state.zTrueFile_m1.replace(".zer", "_w%d.zer" % irun))
+                    
+                    # Collect the data
+                    bb[:, irun] = data[-wfs.nWFS:, 3:self.znMax].reshape((-1, 1))
+  
+                # There is the problem here. GQwt is a dictionary and bb is a ndarray.
+                # At least, use aosTeleState.GQwt[bend] instead.
+                # Check this statement with Bo.
+                self.yfinal = np.sum(aosTeleState.GQwt * bb)
+
+            if (sensor == "covM"):
+
+                # The centors of random numbers are zero.
+                mu = np.zeros(self.zn3Max * 4)
+
+                # Seed the generator. By using this statement, the user can always get 
+                # the same random numbers.
+                np.random.seed(state.obsID)
+                
+                # Add the random samples from a multivariate normal distribution.
+                # Need to check with Bo for doing this.
+                self.yfinal += np.random.multivariate_normal(mu, wfs.covM).reshape(-1, 1)
+        else:
+
+            # Read the file of z4-zk in the previous iteration
+            # [0] for exp No. 0
+            data = np.loadtxt(wfs.zFile_m1[0])
+            self.yfinal = data[:, :self.zn3Max].reshape((-1, 1))
+
+        # Get rid of the intrinsic WFS error
         self.yfinal -= wfs.intrinsicWFS
 
-        # subtract y2c
-        aa = np.loadtxt(ctrl.y2File)
-        self.y2c = aa[-wfs.nWFS:, 0:self.znMax - 3].reshape((-1, 1))
+        # Subtract y2c.
+        # Do not understand this. Check with Bo for this one.
+        y2cData = np.loadtxt(ctrlY2File)
 
-        z_k = self.yfinal[self.zn3IdxAxnWFS] - self.y2c
-        if self.strategy == 'kalman':
+        # Check with Bo for this. What is the meaning of dimension 1 in y2cData?
+        y2c = y2cData[-wfs.nWFS:, 0:self.znMax - 3].reshape((-1, 1))
+
+        # Get the zk after the removing of affection from y2c
+        z_k = self.yfinal[self.zn3IdxAxnWFS] - y2c
+
+        # Do not sure to keep this part of Kalman filter or not. Check with Bo.
+        if (self.strategy == "kalman"):
+
             # the input to each iteration (in addition to Q and R) :
             #         self.xhat[:, state.iIter - 1]
             #         self.P[:, :, state.iIter - 1]
 
-            if state.iIter>1: #for iIter1, iter0 initialized by estimator
-                Kalman_xhat_km1_File = '%s/iter%d/sim%d_iter%d_Kalman_xhat.txt' % (
-                    self.pertDir, self.iIter-1, self.iSim, self.iIter-1)
-                Kalman_P_km1_File = '%s/iter%d/sim%d_iter%d_Kalman_P.txt' % (
-                    self.pertDir, self.iIter-1, self.iSim, self.iIter-1)
+            # For iIter1, iter0 initialized by estimator
+            if (state.iIter>1):
+                
+                Kalman_xhat_km1_File = "%s/iter%d/sim%d_iter%d_Kalman_xhat.txt" % (
+                                            self.pertDir, self.iIter-1, self.iSim, self.iIter-1)
+                
+                Kalman_P_km1_File = "%s/iter%d/sim%d_iter%d_Kalman_P.txt" % (
+                                            self.pertDir, self.iIter-1, self.iSim, self.iIter-1)
+                
+                # Get the "xhat" and "P" in the previous iteration/ run  
                 self.xhat = np.loadtxt(Kalman_xhat_km1_File)
                 self.P = np.loadtxt(Kalman_P_km1_File)
-            # time update
+            
+            # Time update
             xhatminus_k = self.xhat
             Pminus_k = self.P + self.Q
-            # measurement update
+            
+            # Measurement update
             K_k = Pminus_k.dot(self.Anorm.T).dot(
-                pinv_truncate(
-                    self.Anorm.dot(Pminus_k).dot(self.Anorm.T) + self.R, 5))
+                                pinv_truncate(self.Anorm.dot(Pminus_k).dot(self.Anorm.T) + self.R, 5))
             self.xhat[self.dofIdx] = self.xhat[self.dofIdx] + \
-              K_k.dot(z_k - np.reshape(self.Anorm.dot(xhatminus_k),(-1,1)))
-            self.P[np.ix_(self.dofIdx, self.dofIdx)] = \
-              (1-K_k.dot(self.Anorm)).dot(Pminus_k)
+                                        K_k.dot(z_k - np.reshape(self.Anorm.dot(xhatminus_k),(-1,1)))
+            self.P[np.ix_(self.dofIdx, self.dofIdx)] = (1-K_k.dot(self.Anorm)).dot(Pminus_k)
               
             Kalman_xhat_k_File = '%s/iter%d/sim%d_iter%d_Kalman_xhat.txt' % (
-                state.pertDir, state.iIter, state.iSim, state.iIter)
+                                        state.pertDir, state.iIter, state.iSim, state.iIter)
             Kalman_P_k_File = '%s/iter%d/sim%d_iter%d_Kalman_P.txt' % (
-                state.pertDir, state.iIter, state.iSim, state.iIter)
+                                        state.pertDir, state.iIter, state.iSim, state.iIter)
+
             np.savetxt(Kalman_xhat_k_File, self.xhat)
             np.savetxt(Kalman_P_k_File, self.P)
+
         else:
-            self.xhat[self.dofIdx] = np.reshape(self.Ainv.dot(z_k), [-1])
-            if self.strategy == 'pinv' and self.normalizeA:
-                self.xhat[self.dofIdx] = self.xhat[self.dofIdx] / self.dofUnit
-        self.yresi = self.yfinal.copy()
-        self.yresi -= self.y2c
-        self.yresi += np.reshape(
-            self.Ause.dot(-self.xhat[self.dofIdx]), (-1, 1))
+        
+            # Calculate xhat = pinv(A) * y
+            self.xhat[self.dofIdx] = np.reshape(self.Ainv.dot(z_k), -1)
+        
+            # Put the effection of authority back
+            # Anorm = A * authority
+            # xhat = pinv(Anorm) * y * authority
+            if (self.strategy == "pinv" and self.normalizeA):
+                self.xhat[self.dofIdx] = self.xhat[self.dofIdx]*authority
+       
+        # Define the y residure
+        self.yresi = self.yfinal - y2c
+
+        # y_resi := y_resi - A * xhat, where y = A * xhat
+        self.yresi += np.reshape(self.Ause.dot(-self.xhat[self.dofIdx]), (-1, 1))
 
 def pinv_truncate(A, n=0):
     """

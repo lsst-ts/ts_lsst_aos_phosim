@@ -60,6 +60,9 @@ class aosWFS(object):
         self.catFile = None
         self.zCompFile = None
 
+        # Previous zFile (Zk), which means the z4-zn in the previous iteration
+        self.zFile_m1 = None
+
         # Number of wavefront sensor
         self.nWFS = {self.LSST: 4, self.COMCAM: 9}[instName]
 
@@ -114,15 +117,16 @@ class aosWFS(object):
         # Read the intrinsic Zk
         self.intrinsicWFS = intrinsicAll[-self.nWFS:, 3:self.znwcs].reshape((-1, 1))
 
-        # Read the convolution matrix in unit of nm^2
+        # Read the covariance matrix in unit of nm^2
+        # Check this is the covariance matrix or not with Bo.
         covMFilePath = os.path.join(aosDataDir, "covM86.txt")
         self.covM = np.loadtxt(covMFilePath)
 
-        # Reconstruct the convolution matrix if necessary (not baseline condition)
-        # The way to construct the convolution matrix here is weird. Actually, there
+        # Reconstruct the covariance matrix if necessary (not baseline condition)
+        # The way to construct the covariance matrix here is weird. Actually, there
         # is no 4x4 repeation in original "covM86.txt". Need to check with Bo for this.
 
-        # Expand the convolution matrix by repeating the matrix
+        # Expand the covariance matrix by repeating the matrix
         if (self.nWFS > 4):
             nrepeat = int(np.ceil(self.nWFS/4))
             self.covM = np.tile(self.covM, (nrepeat, nrepeat))

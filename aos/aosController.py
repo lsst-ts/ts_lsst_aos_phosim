@@ -79,10 +79,10 @@ class aosController(object):
 
         if esti.strategy == 'pinv':
             if esti.normalizeA:
-                esti.normA(self)
+                esti.normA(self.Authority)
         elif esti.strategy == 'opti':
             if esti.fmotion > 0:
-                esti.optiAinv(self, wfs)
+                esti.optiAinv(self.range, wfs.covM)
 
         if (self.strategy == 'optiPSSN'):
             # use rms^2 as diagnal

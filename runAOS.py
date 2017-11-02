@@ -35,8 +35,6 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
         cwfsModel {str} -- Optical model. (default: {"offAxis"})
     """
 
-    # global esti
-
     # Instantiate the parser for command line to use
     parser = __setParseAugs()
 
@@ -110,8 +108,6 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
     esti = aosEstimator(estiDir, args.estimatorParam, args.inst, wfs, args.icomp, 
                         args.izn3, args.debugLevel)
 
-    # return
-
     # Instantiate the AOS telescope state
     state = aosTeleState(args.inst, args.simuParam, args.iSim, esti.ndofA, 
                          phosimDir, pertDir, imageDir, band, wavelength,
@@ -144,7 +140,7 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
 
             # Update the telescope status
             if (iIter > 0):
-                esti.estimate(state, wfs, ctrl, args.sensor)
+                esti.estimate(state, wfs, ctrl.y2File, args.sensor, authority=ctrl.Authority)
                 ctrl.getMotions(esti, metr, wfs, state)
                 ctrl.drawControlPanel(esti, state)
 
@@ -232,7 +228,7 @@ def __setParseAugs():
     # Sensor type
     sensorChoices = ("ideal", "covM", "phosim", "cwfs", "check", "pass")
     helpDescript = "ideal: use true wavefront in estimator;\
-                    covM: use covarance matrix to estimate wavefront;\
+                    covM: use covariance matrix to estimate wavefront;\
                     phosim: run Phosim to create WFS images;\
                     cwfs: start by running cwfs on existing images;\
                     check: check wavefront against truth;\
