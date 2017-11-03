@@ -16,8 +16,28 @@ class aosController(object):
     # Check with Bo for the unit and how to get this
     rbStroke = np.array([5900, 6700, 6700, 432, 432, 8700, 7600, 7600, 864, 864])
 
-    def __init__(self, ctrlDir, instruFile, paramFile, esti, metr, wfs, M1M3Force, M2Force,
-                 effwave, gain, debugLevel=0):
+    def __init__(self, ctrlDir, instruFile, paramFile, esti, metr, M1M3Force, M2Force,
+                 effwave, gain, covM=None, debugLevel=0):
+        """
+        
+        Initiate the aosController class.
+        
+        Arguments:
+            ctrlDir {[str]} -- Directory of controller parameter file.
+            instruFile {[str]} -- Instrument folder name.
+            paramFile {[str]} -- Controller parameter file (*.ctrl) to read.
+            esti {[aosEstimator]} -- aosEstimator object.
+            metr {[aosMetric]} -- aosMetric object.
+            M1M3Force {[ndarray]} -- Actuator force matrix of M1M3. 
+            M2Force {[ndarray]} -- Actuator force matrix of M2. 
+            effwave {[float]} -- Effective wavelength in um.
+            gain {[float]} -- Gain value feedback in control algorithm.
+        
+        Keyword Arguments:
+            covM {[ndarray]} -- Covariance matrix of WFS. (default: {None})
+            debugLevel {int} -- Debug level. The higher value gives more information.
+                                (default: {0})
+        """
 
         # Name of controller parameter file
         self.filename = os.path.join(ctrlDir, (paramFile + ".ctrl"))
@@ -73,39 +93,90 @@ class aosController(object):
         authorityNoTrunc = self.__getAuthorityH(rbW, M1M3Force, M2Force, dofIdxNoTrunc, esti.nB13Max, esti.nB2Max)
         self.range = 1/authorityNoTrunc*self.rbStroke[0]
 
-
-
-
-        if esti.strategy == 'pinv':
-            if esti.normalizeA:
+        # Decide to modify the sensitivity matrix A based on the strategy or not
+        # Check with Bo for this part
+        # There should be "crude_opti" and "kalman" in aosEstimator.py strategy.
+        if (esti.strategy == "pinv"):
+            # Decide to normalize sensitivity matrix A or not
+            if (esti.normalizeA):
                 esti.normA(self.Authority)
-        elif esti.strategy == 'opti':
-            if esti.fmotion > 0:
-                esti.optiAinv(self.range, wfs.covM)
+        elif (esti.strategy == "opti"):
+            # Decide to add a diagonal perpetubation term in sensitivity matrix A or not. 
+            if (esti.fmotion > 0):
+                esti.optiAinv(self.range, covM)
+        
+        if (self.strategy == "optiPSSN"):
 
-        if (self.strategy == 'optiPSSN'):
-            # use rms^2 as diagnal
+            # Calculate the matrix H by diagonalize the array of authority in rms^2 unit
+            # This means the square of authority
             self.mH = np.diag(self.Authority**2)
-            if self.xref == 'x0xcor':
-                idx1 = 10 + 3  # b3 of M1M3 bending
-                idx2 = 10 + esti.nB13Max + 5  # b5 of M2 bending
-                if esti.dofIdx[idx1] and esti.dofIdx[idx2]:
+          
+            # Update the matrix H for the strategy of "x0xcor"
+            if (self.xref == "x0xcor"):
+
+                # b3 of M1M3 bending
+                idx1 = 10 + 3
+                
+                # b5 of M2 bending
+                # To consider the conditon of dofIdx, it should be idx2 = 10 + 20 + 5
+                # Not sure here because I do not understand the intension of this strategy
+                # Check with Bo for this
+                idx2 = 10 + esti.nB13Max + 5  
+          
+                # Update mH if M1M3 b3 and M2 b5 are both available
+                # Check with Bo for this idea 
+                if (esti.dofIdx[idx1] and esti.dofIdx[idx2]):
+                  
+                    # Do not understand this part.
+                    # Check with Bo the reason to do this.
                     idx1 = sum(esti.dofIdx[:idx1]) - 1
                     idx2 = sum(esti.dofIdx[:idx2]) - 1
-                    self.mH[idx1, idx2] = self.Authority[idx1] * \
-                        self.Authority[idx2] * 100  # 10 times penalty
+                  
+                    # 10 times penalty
+                    # Do not understand here. Check with Bo.
+                    self.mH[idx1, idx2] = self.Authority[idx1] * self.Authority[idx2] * 100  
+
+            # Calcualte the CCmat by diagonalizing the PSSN with unit of um
+            # Do not understand the meaning of CCmat. Check with Bo for this.
 
             # wavelength below in um,b/c output of A in um
             CCmat = np.diag(metr.pssnAlpha) * (2 * np.pi / effwave)**2
+          
+            # Calculate the matrix Q (q^2 = y.T * Q * y)
+            # where q is the image quality metric
+            # Notice here: q^2 ~ y.T * Q * y + c^2
+            # c is the fitting of PSSN of image quality
+            # Check eqs: (3.2 and 3.3) in "Real Time Wavefront Control System for the Large 
+            # Synoptic Survey Telescope (LSST)" 
+
+            # Q = sum_i (w_i * Q_i)
             self.mQ = np.zeros((esti.Ause.shape[1], esti.Ause.shape[1]))
+
+            # nField is the number of field points to describe the image quality on a focal plane.
+            # For LSST, it is 1 + 6*5 = 31 field pints.
             for iField in range(metr.nField):
-                aa = esti.senM[iField, :, :]
-                Afield = aa[np.ix_(esti.zn3Idx, esti.dofIdx)]
+
+                # Get the sensitivity matrix for the related field point
+                # The first dimension of sensitivity matrix is the field point
+                senMfield = esti.senM[iField, :, :]
+                
+                # Get the Afield based on the available Zk and DOF indexes
+                Afield = senMfield[np.ix_(esti.zn3Idx, esti.dofIdx)]
+
+                # Calculate the numerator of F = A.T * Q * A / (A.T * Q * A + rho * H)
+                # Q := A.T * Q * A actually
                 mQf = Afield.T.dot(CCmat).dot(Afield)
+
+                # Consider the weighting of Q = sum_i (w_i * Q_i)
                 self.mQ = self.mQ + metr.w[iField] * mQf
+
+            # Calculate the denominator of F = A.T * Q * A / (A.T * Q * A + rho * H)
+            # F := (A.T * Q * A + rho * H)^(-1) actually
+            # Because the unit is rms^2, the square of rho read from the *.ctrl file is needed.
             self.mF = np.linalg.pinv(self.mQ + self.rho**2 * self.mH)
 
-            if debugLevel >= 3:
+            # Show the elements of matrix Q for the debug or not 
+            if (debugLevel >= 3):
                 print(self.mQ[0, 0])
                 print(self.mQ[0, 9])
 

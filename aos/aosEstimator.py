@@ -147,7 +147,8 @@ class aosEstimator(object):
             if (self.strategy == "opti"):
 
                 # A^(-1) = X * A.T * ( A * X * A.T + M )^(-1)
-                # Not understand here. Check with Bo.
+                # Not understand here. Check with Bo. There is another optiAinv() with different X 
+                # and fluctuation motion.
                 self.Ainv = X.dot(self.Anorm.T).dot(np.linalg.pinv(self.Anorm.dot(X).dot(self.Anorm.T) + wfs.covM))
             
             # The ref. paper of Kalman filter is "An Introduction to the Kalman Filter" 
@@ -482,7 +483,7 @@ class aosEstimator(object):
         self.yresi = self.yfinal - y2c
 
         # y_resi := y_resi - A * xhat, where y = A * xhat
-        self.yresi += np.reshape(self.Anorm.dot(-self.xhat[self.dofIdx]), (-1, 1))
+        self.yresi += np.reshape(self.Ause.dot(-self.xhat[self.dofIdx]), (-1, 1))
 
 def pinv_truncate(A, n=0):
     """

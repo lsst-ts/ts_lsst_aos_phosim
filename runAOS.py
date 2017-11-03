@@ -35,7 +35,7 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
         cwfsModel {str} -- Optical model. (default: {"offAxis"})
     """
 
-    global ctrl, M1M3, M2, esti, metr
+    global ctrl, M1M3, M2, esti, metr, ctrlTemp
 
     # Instantiate the parser for command line to use
     parser = __setParseAugs()
@@ -108,8 +108,8 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
     imageDir = os.path.join(outputDir, "image", simDirName)
 
     # Instantiate the AOS estimator
-    esti = aosEstimator(aosDataDir, args.estimatorParam, args.inst, wfs, args.icomp,
-                        args.izn3, args.debugLevel)
+    esti = aosEstimator(aosDataDir, args.estimatorParam, args.inst, wfs, icomp=args.icomp,
+                        izn3=args.izn3, debugLevel=args.debugLevel)
 
     # Instantiate the AOS telescope state
     state = aosTeleState(args.inst, args.simuParam, args.iSim, esti.ndofA,
@@ -122,8 +122,9 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
 
     # Instantiate the AOS metrology and controller
     metr = aosMetric(args.inst, state.opdSize, wfs.znwcs3, args.debugLevel)
-    ctrl = aosController(aosDataDir, args.inst, args.controllerParam, esti, metr, wfs,
-                         M1M3.force, M2.force, effwave, args.gain, args.debugLevel)
+    ctrl = aosController(aosDataDir, args.inst, args.controllerParam, esti, metr,
+                         M1M3.force, M2.force, effwave, args.gain, covM=wfs.covM, 
+                         debugLevel=args.debugLevel)
 
     return
 
