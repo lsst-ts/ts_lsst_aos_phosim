@@ -36,8 +36,14 @@ class aosM2(object):
         by = data[:, 1]
         bz = data[:, 2:]
 
-        # !!! we are using M1M3 forces in place of M2 forces --> Check with Bo for this.
+
         # Get the actuator force
+
+        # !!! We are using M1M3 forces in place of M2 forces because no M2 force FEA data
+        # PhoSim does not need this file. But this should be updated by the measurement in the future.
+        # It is noted that if M1M3 and M2 FEA data are updated, the related data in PhoSim
+        # is also needed to be updated. But the format is different because the grid between
+        # FEA and ZEMAX is diffrent.
         data = np.loadtxt(os.path.join(M2dir, "M2_1um_force.DAT"))
         self.force = data[:, :]
 

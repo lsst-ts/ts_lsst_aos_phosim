@@ -80,15 +80,20 @@ class aosEstimator(object):
         # Read the file of sensitivity matrix
         self.senM = np.loadtxt(self.senMFile)
 
-        # Reshape the sensitivity matrix --> Check with Bo for the meaning of first dimension
-        # For lsst, the shape of senM is (35, 19, 50)
+        # Reshape the sensitivity matrix
+        
+        # There are 35 field points. 35 = 1 + 6*5 + 4 --> This is to map all focal plane.
+        # The reference is at page 16, figure 12 in "An Integrated Modeling Framework for 
+        # the Large Synoptic Survey Telescope (LSST)".
+
+        # For LSST, the shape of senM is (35, 19, 50)
         self.senM = self.senM.reshape((-1, self.zn3Max, self.ndofA))
 
-        # Need to check the arrangement of sensitivity matrix of M1M3 and M2 with Bo.
-        # If the arrangement of senM is [(hexapod dof: 10), (M1M3), (M2)], 
-        # it should be range(10 + intended M1M3) + range(10 + max M1M3, 10 + max M1M3 + intended M2)
+        # The arrangement of senM is [(M2 hexapod), (Camera haxapod), (M1M3), (M2)]. 
+        # It should be range(10 + intended M1M3) + range(10 + max M1M3, 10 + max M1M3 + intended M2)
+        # max M1M3 index length is 20 here
         self.senM = self.senM[:, :, np.concatenate( (range(10 + self.nB13Max), 
-                            range(10 + self.nB13Max, 10 + self.nB13Max + self.nB2Max)))]
+                            range(30, 30 + self.nB2Max)))]
         
         # Show the strategy and shape of sensitivity matrix or not
         if (debugLevel >= 3):
@@ -96,7 +101,8 @@ class aosEstimator(object):
             print(self.senM.shape)
 
         # Get the sensitivity matrix of WFS. It is 4 for LSST and 9 for ComCam.
-        # Need to check with Bo for the meaning of dimension 1 in senM
+        # It is noted that for LSST and ComCam, different sensitivity matrix files will be used.
+        # This is why the index of "-wfs.nWFS" can be used directly.
         A = self.senM[-wfs.nWFS:, :, :].reshape((-1, self.ndofA))
 
         # Repeat the matrix of Zk by the times of number of WFS 
@@ -117,24 +123,20 @@ class aosEstimator(object):
                 print(self.normalizeA)
 
         # Construct the normalized sensitivity matrix A
-        # Check with Bo for this statement. It should be self.Anorm = self.Ause.copy()
-        # because self.Ause is a ndarray object.
-        self.Anorm = self.Ause
+        self.Anorm = self.Ause.copy()
         
         # Show the information of sensitivity matrix A or not
-        # Check with Bo we need the Anorm to show ot not.
         if (debugLevel >= 3):
             print("---checking Anorm (actually Ause):")
             print(self.Anorm[:5, :5])
-            print(self.Ause[:5, :5])
         
         # Get the pseudo-inverse matrix of A
         if (self.strategy == "pinv"):
             # Do the truncation if needed. 
-            # Need to check with Bo why not decide the truncation terms automatically
+            # This command needs more study to check how to decide the inf number.
             self.Ainv = pinv_truncate(self.Anorm, self.nSingularInf)
         
-        # Check with Bo for these: "opti" and "kalman" and "crude_opti"
+        # Check with Bo for these: "opti" and "crude_opti"
         elif self.strategy in ("opti", "kalman"):
 
             # Empirical estimates (by Doug M.), not used when self.fmotion<0
@@ -148,9 +150,12 @@ class aosEstimator(object):
                 # Not understand here. Check with Bo.
                 self.Ainv = X.dot(self.Anorm.T).dot(np.linalg.pinv(self.Anorm.dot(X).dot(self.Anorm.T) + wfs.covM))
             
+            # The ref. paper of Kalman filter is "An Introduction to the Kalman Filter" 
+            # by Greg Welch and Gary Bishop at 2006
+            # https://www.cs.unc.edu/~welch/media/pdf/kalman_intro.pdf
             elif (self.strategy == "kalman"):
 
-                # Not understand here. Check with Bo for the paper or this method.
+                # Refactor here by following the paper
                 self.P = np.zeros((self.ndofA, self.ndofA))
                 self.Q = X
                 self.R = wfs.covM*100
@@ -212,7 +217,7 @@ class aosEstimator(object):
                 elif (line.startswith("normalize_A")):
                     self.normalizeA = bool(int(line.split()[1]))
 
-                # Number of singular values to set to infinity --> Need to check with Bo for this
+                # Number of singular values to set to infinity
                 elif (line.startswith("n_singular_inf")):
                     self.nSingularInf = int(line.split()[1])
 
@@ -477,7 +482,7 @@ class aosEstimator(object):
         self.yresi = self.yfinal - y2c
 
         # y_resi := y_resi - A * xhat, where y = A * xhat
-        self.yresi += np.reshape(self.Ause.dot(-self.xhat[self.dofIdx]), (-1, 1))
+        self.yresi += np.reshape(self.Anorm.dot(-self.xhat[self.dofIdx]), (-1, 1))
 
 def pinv_truncate(A, n=0):
     """

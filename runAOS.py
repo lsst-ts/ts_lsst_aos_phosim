@@ -20,17 +20,17 @@ from aos.aosTeleState import aosTeleState
 
 def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="offAxis"):
     """
-    
+
     Run the AOS close loop code.
-    
+
     Arguments:
         phosimDir {[str]} -- PhoSim directory.
         cwfsDir {[str]} -- cwfs directory.
         outputDir {[str]} -- Output files directory.
         aosDataDir {[str]} -- AOS data directory.
-    
+
     Keyword Arguments:
-        algoFile {str} -- Algorithm to solve the transport of intensity equation (TIE). 
+        algoFile {str} -- Algorithm to solve the transport of intensity equation (TIE).
                           (default: {"exp"})
         cwfsModel {str} -- Optical model. (default: {"offAxis"})
     """
@@ -59,7 +59,7 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
         print(args)
 
     # Decide the wavelength in micron
-    # Need to check with Bo why this condition (0.5) is special
+    # 0.5 micron is a ref wavelength. And PhoSim will do the monochromatic light simulation.
     if (args.wavestr == "0.5"):
         band = "g"
         wavelength = float(args.wavestr)
@@ -108,11 +108,11 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
     imageDir = os.path.join(outputDir, "image", simDirName)
 
     # Instantiate the AOS estimator
-    esti = aosEstimator(aosDataDir, args.estimatorParam, args.inst, wfs, args.icomp, 
+    esti = aosEstimator(aosDataDir, args.estimatorParam, args.inst, wfs, args.icomp,
                         args.izn3, args.debugLevel)
 
     # Instantiate the AOS telescope state
-    state = aosTeleState(args.inst, args.simuParam, args.iSim, esti.ndofA, 
+    state = aosTeleState(args.inst, args.simuParam, args.iSim, esti.ndofA,
                          phosimDir, pertDir, imageDir, band, wavelength,
                          args.enditer, args.debugLevel, M1M3=M1M3, M2=M2)
 
@@ -133,7 +133,7 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
 
     # Do the close loop simulation
     for iIter in range(args.startiter, args.enditer + 1):
-        
+
         # Show the iteration number of not
         if (args.debugLevel >= 3):
             print("iteration No. %d" % iIter)
@@ -169,9 +169,9 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
 
             if args.sensor not in ("ideal", "covM", "pass", "check"):
                 wfs.getZ4CfromBase(args.baserun, state.iSim)
-        
+
         else:
-            state.getOPDAll(args.opdoff, metr, args.numproc, wfs.znwcs, wfs.inst.obscuration, 
+            state.getOPDAll(args.opdoff, metr, args.numproc, wfs.znwcs, wfs.inst.obscuration,
                             args.debugLevel)
             state.getPSFAll(args.psfoff, metr, args.numproc, args.debugLevel)
             metr.getPSSNandMore(args.pssnoff, state, args.numproc, args.debugLevel)
@@ -198,9 +198,9 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
 
 def __setParseAugs():
     """
-    
+
     Set the parser to pass the arguments from the command line.
-    
+
     Returns:
         [ArgumentParser] -- Parser for the command line to use.
     """
@@ -221,15 +221,15 @@ def __setParseAugs():
     # Override the "izn3" in aosEstimator
     helpDescript = "override izn3 in the estimator parameter file, default=no override"
     parser.add_argument("-izn3", type=int, help=helpDescript)
-    
+
     # Iteration number to start with
     helpDescript = "iteration No. to start with, default=0"
     parser.add_argument("-start", dest="startiter", type=int, default=0, help=helpDescript)
-    
+
     # Iteration number to end with
     helpDescript = "iteration No. to end with, default=5"
     parser.add_argument("-end", dest="enditer", type=int, default=5, help=helpDescript)
-    
+
     # Sensor type
     sensorChoices = ("ideal", "covM", "phosim", "cwfs", "check", "pass")
     helpDescript = "ideal: use true wavefront in estimator;\
@@ -281,13 +281,13 @@ def __setParseAugs():
     parser.add_argument("-s", dest="simuParam", default="single_dof", help=helpDescript)
 
     # AOS estimator parameters
-    helpDescript = "estimator parameter file in data/, default=pinv" 
+    helpDescript = "estimator parameter file in data/, default=pinv"
     parser.add_argument("-e", dest="estimatorParam", default="pinv", help=helpDescript)
 
     # AOS controller parameters
     controlChoices = ("optiPSSN_x0", "optiPSSN_0", "optiPSSN_x0xcor", "optiPSSN_x00", "null")
     helpDescript = "controller parameter file in data/, default=optiPSSN"
-    parser.add_argument("-c", dest="controllerParam", default=controlChoices[0], 
+    parser.add_argument("-c", dest="controllerParam", default=controlChoices[0],
                         choices=controlChoices, help=helpDescript)
 
     # Wavelength in micron
@@ -325,12 +325,12 @@ if __name__ == "__main__":
 
     # Get the start time
     timeStart = datetime.now().replace(microsecond=0)
-    
+
     # Do the AOS
     main(phosimDir, cwfsDir, outputDir, aosDataDir)
 
     # Get the finish time
     timeFinish = datetime.now().replace(microsecond=0)
-    
+
     # Print the calculation time
     print("Calcuation time is: %s." % (timeFinish - timeStart))
