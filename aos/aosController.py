@@ -4,78 +4,77 @@
 # @       Large Synoptic Survey Telescope
 
 import os
-import glob
+from glob import glob
 import numpy as np
 import matplotlib.pyplot as plt
 
+from aos.aosMetric import getInstName
 
 class aosController(object):
 
-    def __init__(self, instruFile, paramFile, esti, metr, wfs, M1M3, M2,
-                 effwave, gain, debugLevel):
+    # Rigid body stroke
+    # Check with Bo for the unit and how to get this
+    rbStroke = np.array([5900, 6700, 6700, 432, 432, 8700, 7600, 7600, 864, 864])
 
-        self.filename = os.path.join('data/', (paramFile + '.ctrl'))
-        fid = open(self.filename)
-        iscomment = False
-        for line in fid:
-            line = line.strip()
-            if (line.startswith('###')):
-                iscomment = ~iscomment
-            if (not(line.startswith('#')) and
-                    (not iscomment) and len(line) > 0):
-                if (line.startswith('control_strategy')):
-                    self.strategy = line.split()[1]
-                if (line.startswith('xref')):
-                    self.xref = line.split()[1]
-                elif (line.startswith('shift_gear')):
-                    self.shiftGear = bool(int(line.split()[1]))
-                    if self.shiftGear:
-                        self.shiftGearThres = float(line.split()[2])
-                elif (line.startswith('M1M3_actuator_penalty')):
-                    self.rhoM13 = float(line.split()[1])
-                elif (line.startswith('M2_actuator_penalty')):
-                    self.rhoM2 = float(line.split()[1])
-                elif (line.startswith('Motion_penalty')):
-                    self.rho = float(line.split()[1])
+    def __init__(self, ctrlDir, instruFile, paramFile, esti, metr, wfs, M1M3Force, M2Force,
+                 effwave, gain, debugLevel=0):
 
-        fid.close()
+        # Name of controller parameter file
+        self.filename = os.path.join(ctrlDir, (paramFile + ".ctrl"))
 
-        aa = instruFile
-        if aa[-2:].isdigit():
-            aa = aa[:-2]
-        src = glob.glob('data/%s/y2*txt' % (aa))
-        self.y2File = src[0]
-        if debugLevel >= 1:
-            print('control strategy: %s' % self.strategy)
-            print('Using y2 file: %s' % self.y2File)
+        # Assign the gain value
         self.gain = gain
+
+        # Parameters of controller
+        self.strategy = None
+        self.xref = None
+        self.shiftGear = None
+        self.shiftGearThres = None
+        self.rhoM13 = None
+        self.rhoM2 = None
+        self.rho = None
+
+        # Read the file to get the parameters
+        self.__readFile(self.filename)
+
+        # Get the instrument name
+        instName, defocalOffset = getInstName(instruFile)
+
+        # Read the y2 file of specific instrument. Check with Bo for this.
+        # Do not understand the meaning of y2.
+        y2FilePath = os.path.join(ctrlDir, instName, "y2*txt")
+        self.y2File = glob(y2FilePath)[0]
         self.y2 = np.loadtxt(self.y2File)
 
-        # establish control authority of the DOFs
-        aa = M1M3.force[:, :esti.nB13Max]
-        aa = aa[:, esti.dofIdx[10:10 + esti.nB13Max]]
-        mHM13 = np.std(aa, axis=0)
-        aa = M2.force[:, :esti.nB2Max]
-        aa = aa[:, esti.dofIdx[
-            10 + esti.nB13Max:10 + esti.nB13Max + esti.nB2Max]]
-        mHM2 = np.std(aa, axis=0)
-        # For the rigid body DOF (r for rigid)
-        # weight based on the total stroke
-        rbStroke = np.array([5900, 6700, 6700, 432, 432,
-                             8700, 7600, 7600, 864, 864])
-        rbW = (rbStroke[0] / rbStroke)
-        mHr = rbW[esti.dofIdx[:10]]
-        self.Authority = np.concatenate(
-            (mHr, self.rhoM13 * mHM13, self.rhoM2 * mHM2))
-        # #range of motion for the DOFs.
-        # = 1/self.Authority*rbStroke[0], when there is no truncation of DOF
-        self.range = np.concatenate((rbStroke,
-                                     1 / (self.rhoM13 * np.std(
-                                         M1M3.force[:, :esti.nB13Max],
-                                         axis=0)) * rbStroke[0],
-                                     1 / (self.rhoM2 * np.std(
-                                         M2.force[:, :esti.nB2Max],
-                                         axis=0)) * rbStroke[0]))
+        # Show the paths of control strategy and y2 files
+        if (debugLevel >= 1):
+            print("control strategy: %s" % self.strategy)
+            print("Using y2 file: %s" % self.y2File)
+
+        # Get the authority (H) of each subsystem (J = y.T * Q * y + rho * u.T * H * u). 
+        # The matrix H defines the distribution of control authority among various 
+        # actuator groups (rigid body abd shape actuators) such that 1 um or 1 arcsec 
+        # rigid body displacement corresponds to 1 N actuator.  
+
+        # Establish control authority of the DOFs
+
+        # Get the normalized rigid body weighting
+        # For the rigid body DOF (r for rigid), weight based on the total stroke
+        # Need to check with Bo for the reason of normalization
+        rbW = self.rbStroke[0]/self.rbStroke
+
+        # Construct the authority array (H)
+        self.Authority = self.__getAuthorityH(rbW, M1M3Force, M2Force, esti.dofIdx, esti.nB13Max, esti.nB2Max)
+
+        # Calculate the range of motion of DOFs, which means there is no truncation of DOF.
+        # range = 1/self.Authority*rbStroke[0]
+        dofIdxNoTrunc = np.ones(len(esti.dofIdx), dtype=bool)
+
+        authorityNoTrunc = self.__getAuthorityH(rbW, M1M3Force, M2Force, dofIdxNoTrunc, esti.nB13Max, esti.nB2Max)
+        self.range = 1/authorityNoTrunc*self.rbStroke[0]
+
+
+
 
         if esti.strategy == 'pinv':
             if esti.normalizeA:
@@ -109,6 +108,133 @@ class aosController(object):
             if debugLevel >= 3:
                 print(self.mQ[0, 0])
                 print(self.mQ[0, 9])
+
+    def __getAuthorityH(self, rbW, M1M3Force, M2Force, dofIdx, nB13Max, nB2Max):
+        """
+        
+        Get the authority matrix H, which is constructed by all subsystems.
+        
+        Arguments:
+            rbW {[ndarray]} -- Weighting of rigid body (M2 hexapod + camera hexapod).
+            M1M3Force {[ndarray]} -- Acturator force matrix of M1M3.
+            M2Force {[ndarray]} -- Acturator force matrix of M2.
+            dofIdx {[ndarray]} -- Available degree of freedom index.
+            nB13Max {[int]} -- Maximum number of available bending mode of M1M3.
+            nB2Max {[int]} -- Maximum number of available bending mode of M2.
+        
+        Returns:
+            [ndarray] -- Authority matrix H.
+        """
+
+        # Get the elements of matrix H belong to rigid body
+        mHr = rbW[dofIdx[:10]]
+
+        # Get the elements of matrix H belong to M1M3
+        # The sum of index length in DOF of M2 and camera hexapods is 10
+        mHM13 = self.__getSubH(M1M3Force, dofIdx, 10, nB13Max)
+
+        # Get the elements of matrix H belong to M2
+        # The sum of index length in DOF of M2 and camera hexapods is 10
+        mHM2 = self.__getSubH(M2Force, dofIdx, 30, nB2Max)
+
+        # Construct the authority array (H)
+        authority = np.concatenate((mHr, self.rhoM13*mHM13, self.rhoM2*mHM2))
+
+        return authority
+
+    def __getSubH(self, force, dofIdx, startIdx, targetSubIndexLen):
+        """
+        
+        Calculate the distribution of control authority of specific subsystem. 
+        
+        Arguments:
+            force {[ndarray]} -- Actuator force matrix (row: actuator, column: bending mode).
+            dofIdx {[ndarray]} -- Available degree of freedom.
+            startIdx {[int]} -- Start index of the subsystem in dofIdx.
+            targetSubIndexLen {[int]} -- Length of index (bending mode) belong to the 
+                                         subsystem in dofIdx.
+        
+        Returns:
+            [ndarray] -- Distrubution of subsystem authority.
+        """
+
+        # Get the force data
+        data = force[:, :int(targetSubIndexLen)]
+        data = data[:, dofIdx[int(startIdx):int(startIdx + targetSubIndexLen)]]
+
+        # Calculate the element of matrix H (authority) of specific subsystem
+        # Check with Bo for the physical meaning of this
+        mH = np.std(data, axis=0)
+
+        return mH
+
+    def __readFile(self, filePath):
+        """
+        
+        Read the AOS controller parameter file.
+        
+        Arguments:
+            filePath {[str]} -- Path of file of controller parameters.
+        """
+
+        # Parameters used in reading the file
+        iscomment = False
+
+        # Read the file
+        fid = open(filePath)
+        for line in fid:
+            
+            # Strip the line
+            line = line.strip()
+            
+            # Ignore the comment part
+            if (line.startswith("###")):
+                iscomment = ~iscomment
+            
+            if (not(line.startswith("#")) and (not iscomment) and len(line) > 0):
+            
+                # Define the control strategy. Default is optiPSSN.
+                # This means the target of control is to minimize the PSSN.
+                if (line.startswith("control_strategy")):
+                    self.strategy = line.split()[1]
+            
+                # The strategy in optiPSSN. There are three types: _0, _x0, and  _x00.
+                # The offset will trace the real value and target for 0 in "_0" type.
+                # The offset will only trace the previous one in "_x0" type.
+                # The offset will only trace the relative changes of offset without 
+                # regarding the real value in "_x00" type. 
+                if (line.startswith("xref")):
+                    self.xref = line.split()[1]
+            
+                # The new gain value once the system is stable. That means PSSN is less 
+                # than the threshold, and the system is judged to have corrected the 
+                # wavefront error.
+                # Not sure need to add the turn-back-original-gain mechanism or not.
+                # Check with Bo for this.
+                elif (line.startswith("shift_gear")):
+                    self.shiftGear = bool(int(line.split()[1]))
+            
+                    # The threshold of PSSN to change the gain value
+                    if (self.shiftGear):
+                        self.shiftGearThres = float(line.split()[2])
+            
+                # M1M3 actuator penalty factor
+                # Not really understand the meaning of penalty here. Check with Bo.
+                elif (line.startswith("M1M3_actuator_penalty")):
+                    self.rhoM13 = float(line.split()[1])
+            
+                # M2 actuator penalty factor
+                # Not really understand the meaning of penalty here. Check with Bo.
+                elif (line.startswith("M2_actuator_penalty")):
+                    self.rhoM2 = float(line.split()[1])
+            
+                # Penalty on control motion as a whole
+                # Not really understand the meaning of penalty here. Check with Bo.
+                elif (line.startswith("Motion_penalty")):
+                    self.rho = float(line.split()[1])
+
+        # Close the file
+        fid.close()
 
     def getMotions(self, esti, metr, wfs, state):
         self.uk = np.zeros(esti.ndofA)
@@ -579,3 +705,7 @@ class aosController(object):
                     # remove everything else in between startIter and endIter
                     if os.path.isfile(sumPlotFile):
                         os.remove(sumPlotFile)
+
+if __name__ == "__main__":
+
+    pass
