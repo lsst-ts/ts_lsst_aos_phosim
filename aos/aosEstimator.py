@@ -46,8 +46,6 @@ class aosEstimator(object):
         self.dofIdx = None
         self.zn3Idx = None
 
-        self.dofUnit = None
-
         # Read the file to get the parameters
         self.__readFile(self.filename, icomp, izn3)
 
@@ -313,12 +311,6 @@ class aosEstimator(object):
 
         # Check with Bo the reason to normalize A based on the authority.
         # This does not make sense to me.
-
-        # Get the freedom of changing the value/ motion of degree of freedom (DOF).
-        # The authority means how easy or difficult to change the related DOF.
-        # This is why to take the inverse of authority here.
-        # Replace the self.dofUnit by self.authority or get rid of it in the final
-        self.dofUnit = 1/authority
         
         # Normalize the element of A based on the level of authority
         # The dimension of Ause is n x m. The authority array is 1 x m after the reshape.
@@ -470,7 +462,10 @@ class aosEstimator(object):
 
         else:
         
-            # Calculate xhat = pinv(A) * y
+            # Calculate xhat_{k} = pinv(A) * y_{k}
+            # The output of xhat here is the best solution with minimum norm
+            # This solution will be used as the input of controller to estimate 
+            # the next movement (getMotions()).
             self.xhat[self.dofIdx] = np.reshape(self.Ainv.dot(z_k), -1)
         
             # Put the effection of authority back

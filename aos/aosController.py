@@ -54,14 +54,19 @@ class aosController(object):
         self.rhoM2 = None
         self.rho = None
 
+        # Predicted movement at time k
+        self.uk = None
+        self.CCmat = None
+
         # Read the file to get the parameters
         self.__readFile(self.filename)
 
         # Get the instrument name
         instName, defocalOffset = getInstName(instruFile)
 
-        # Read the y2 file of specific instrument. Check with Bo for this.
-        # Do not understand the meaning of y2.
+        # Read the y2 file of specific instrument. y = A * x + A2 * x2 + w. y2 = A2 * x2
+        # x2 is the uncontrolled perturbations. 
+        # Check with Bo for why all values are zeros. How to handle the real condition?
         y2FilePath = os.path.join(ctrlDir, instName, "y2*txt")
         self.y2File = glob(y2FilePath)[0]
         self.y2 = np.loadtxt(self.y2File)
@@ -140,7 +145,7 @@ class aosController(object):
             # Do not understand the meaning of CCmat. Check with Bo for this.
 
             # wavelength below in um,b/c output of A in um
-            CCmat = np.diag(metr.pssnAlpha) * (2 * np.pi / effwave)**2
+            self.CCmat = np.diag(metr.pssnAlpha) * (2 * np.pi / effwave)**2
           
             # Calculate the matrix Q (q^2 = y.T * Q * y)
             # where q is the image quality metric
@@ -165,7 +170,7 @@ class aosController(object):
 
                 # Calculate the numerator of F = A.T * Q * A / (A.T * Q * A + rho * H)
                 # Q := A.T * Q * A actually
-                mQf = Afield.T.dot(CCmat).dot(Afield)
+                mQf = Afield.T.dot(self.CCmat).dot(Afield)
 
                 # Consider the weighting of Q = sum_i (w_i * Q_i)
                 self.mQ = self.mQ + metr.w[iField] * mQf
@@ -270,18 +275,12 @@ class aosController(object):
                     self.strategy = line.split()[1]
             
                 # The strategy in optiPSSN. There are three types: _0, _x0, and  _x00.
-                # The offset will trace the real value and target for 0 in "_0" type.
-                # The offset will only trace the previous one in "_x0" type.
-                # The offset will only trace the relative changes of offset without 
-                # regarding the real value in "_x00" type. 
                 if (line.startswith("xref")):
                     self.xref = line.split()[1]
             
                 # The new gain value once the system is stable. That means PSSN is less 
                 # than the threshold, and the system is judged to have corrected the 
                 # wavefront error.
-                # Not sure need to add the turn-back-original-gain mechanism or not.
-                # Check with Bo for this.
                 elif (line.startswith("shift_gear")):
                     self.shiftGear = bool(int(line.split()[1]))
             
@@ -308,44 +307,83 @@ class aosController(object):
         fid.close()
 
     def getMotions(self, esti, metr, wfs, state):
+
+        # Initialize the values.
+        # Need to check to keep this part ot not in the final.
+        # Use the "return" might be better.
         self.uk = np.zeros(esti.ndofA)
-        self.gainUse = self.gain
-        if hasattr(self, 'shiftGear'):
-            if self.shiftGear and (metr.GQFWHMeff > self.shiftGearThres):
-                self.gainUse = 1
-        if (self.strategy == 'null'):
+
+        # Gain value to use in the run time
+        # Use the higher gain value if the image quality is not good enough.
+        gainUse = self.gain
+        if (self.shiftGear and (metr.GQFWHMeff > self.shiftGearThres)):
+            gainUse = 1
+
+        # Calculate uk = - gain * (xhat + c) based on different strategy
+        # For the negative sign, follow:
+        # https://confluence.lsstcorp.org/pages/viewpage.action?pageId=64698465
+
+        # Check with Bo for the reason to use "null"
+        if (self.strategy == "null"):
+
+            # Calculate y2 = sum_i (w_i * y2f), which i is ith field point
             y2 = np.zeros(sum(esti.zn3Idx))
             for iField in range(metr.nField):
+                # Get the avialble y2 values based on the available Zk index
                 y2f = self.y2[iField, esti.zn3Idx]
-                y2 = y2 + metr.w[iField] * y2f
+                y2 = y2 + metr.w[iField]*y2f
+            
+            # Repeat matrix for all WFSs
             y2c = np.repeat(y2, wfs.nWFS)
-            x_y2c = esti.Ainv.dot(y2c)
-            if esti.normalizeA:
-                x_y2c = x_y2c / esti.dofUnit
-            self.uk[esti.dofIdx] = - self.gainUse * \
-                (esti.xhat[esti.dofIdx] + x_y2c)
 
-        elif (self.strategy == 'optiPSSN'):
-            CCmat = np.diag(metr.pssnAlpha) * (2 * np.pi / state.effwave)**2
-            Mx = np.zeros(esti.Ause.shape[1])
+            # Calculate x = inv(A) * y
+            x_y2c = esti.Ainv.dot(y2c)
+            
+            # Change the unit back to the correct one because of the normalized A.
+            if (esti.normalizeA):
+                x_y2c = x_y2c * self.Authority
+            
+            # Calculate uk
+            self.uk[esti.dofIdx] = - gainUse * (esti.xhat[esti.dofIdx] + x_y2c)
+
+        elif (self.strategy == "optiPSSN"):
+
+            # Construct the array x = inv(A) * y
+            Mx = np.zeros(esti.Ause.shape[1])            
             for iField in range(metr.nField):
-                aa = esti.senM[iField, :, :]
-                Afield = aa[np.ix_(esti.zn3Idx, esti.dofIdx)]
+                
+                # Get the sensitivity matrix in specific field point with available
+                # Zk and DOF index 
+                senMfield = esti.senM[iField, :, :]
+                Afield = senMfield[np.ix_(esti.zn3Idx, esti.dofIdx)]
+                
+                # Get the avialble y2 values based on the available Zk index
+                # There should be a update of y2 before/ after this. Check with Bo for this.
                 y2f = self.y2[iField, esti.zn3Idx]
+
+                # Calculate y_{k+1} = A * x_{k} + y2_{k}
                 yf = Afield.dot(esti.xhat[esti.dofIdx]) + y2f
-                Mxf = Afield.T.dot(CCmat).dot(yf)
+                
+                # Calcualte A.T * Q * y_{k+1} and considering the weighting
+                Mxf = Afield.T.dot(self.CCmat).dot(yf)
                 Mx = Mx + metr.w[iField] * Mxf
-            if self.xref == 'x0' or self.xref == 'x0xcor':
-                self.uk[esti.dofIdx] = - self.gainUse * self.mF.dot(Mx)
-            elif self.xref == '0':
-                self.uk[esti.dofIdx] = self.gainUse * self.mF.dot(
-                    -self.rho**2 * self.mH.dot(state.stateV[esti.dofIdx]) -
-                    Mx)
-            elif self.xref == 'x00':
-                self.uk[esti.dofIdx] = self.gainUse * self.mF.dot(
+
+            # The offset will trace the real value and target for 0 in "_0" type.
+            # The offset will only trace the previous one in "_x0" type.
+            # The offset will only trace the relative changes of offset without 
+            # regarding the real value in "_x00" type. 
+
+            if self.xref in ("x0", "x0xcor"):
+                self.uk[esti.dofIdx] = - gainUse * self.mF.dot(Mx)
+            
+            elif (self.xref == "0"):
+                self.uk[esti.dofIdx] = gainUse * self.mF.dot(
+                    -self.rho**2 * self.mH.dot(state.stateV[esti.dofIdx]) - Mx)
+            
+            elif (self.xref == "x00"):
+                self.uk[esti.dofIdx] = gainUse * self.mF.dot(
                     self.rho**2 * self.mH.dot(state.stateV0[esti.dofIdx] -
-                                              state.stateV[esti.dofIdx]) -
-                    Mx)
+                                              state.stateV[esti.dofIdx]) - Mx)
 
     def drawControlPanel(self, esti, state):
 

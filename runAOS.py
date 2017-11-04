@@ -35,7 +35,7 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
         cwfsModel {str} -- Optical model. (default: {"offAxis"})
     """
 
-    global ctrl, M1M3, M2, esti, metr, ctrlTemp
+    global ctrl, M1M3, M2, esti, metr
 
     # Instantiate the parser for command line to use
     parser = __setParseAugs()
@@ -126,7 +126,7 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
                          M1M3.force, M2.force, effwave, args.gain, covM=wfs.covM, 
                          debugLevel=args.debugLevel)
 
-    return
+    # return
 
     # *****************************************
     # start the Loop
