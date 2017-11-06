@@ -119,14 +119,11 @@ class aosController(object):
             # Update the matrix H for the strategy of "x0xcor"
             if (self.xref == "x0xcor"):
 
-                # b3 of M1M3 bending
+                # b3 of M1M3 bending, 10 is for the DOF of M2 and camera hexapod
                 idx1 = 10 + 3
                 
-                # b5 of M2 bending
-                # To consider the conditon of dofIdx, it should be idx2 = 10 + 20 + 5
-                # Not sure here because I do not understand the intension of this strategy
-                # Check with Bo for this
-                idx2 = 10 + esti.nB13Max + 5  
+                # b5 of M2 bending, 20 is for the maximum bending mode of M1M3
+                idx2 = 10 + 20 + 5  
           
                 # Update mH if M1M3 b3 and M2 b5 are both available
                 # Check with Bo for this idea 
@@ -306,11 +303,23 @@ class aosController(object):
         # Close the file
         fid.close()
 
-    def getMotions(self, esti, metr, wfs, state):
+    def getMotions(self, esti, metr, nWFS=None, state=None):
+        """
+        
+        Get the offset of degree of freedom (DOF).
+        
+        Arguments:
+            esti {[aosEstimator]} -- aosEstimator object.
+            metr {[aosMetric]} -- aosMetric object.
+        
+        Keyword Arguments:
+            nWFS {[int]} -- Number of wavefront sensor. (default: {None})
+            state {[aosTeleState]} -- aosTeleState object. (default: {None})
+        """
 
         # Initialize the values.
         # Need to check to keep this part ot not in the final.
-        # Use the "return" might be better.
+        # Use the "return" might be better in the future. Will change this in the refactoring.
         self.uk = np.zeros(esti.ndofA)
 
         # Gain value to use in the run time
@@ -334,7 +343,7 @@ class aosController(object):
                 y2 = y2 + metr.w[iField]*y2f
             
             # Repeat matrix for all WFSs
-            y2c = np.repeat(y2, wfs.nWFS)
+            y2c = np.repeat(y2, nWFS)
 
             # Calculate x = inv(A) * y
             x_y2c = esti.Ainv.dot(y2c)
@@ -368,22 +377,38 @@ class aosController(object):
                 Mxf = Afield.T.dot(self.CCmat).dot(yf)
                 Mx = Mx + metr.w[iField] * Mxf
 
-            # The offset will trace the real value and target for 0 in "_0" type.
+            # Estimate the motion/ offset based on the feedback algorithm to use.
+            # x_{k+1} = x_{k} + u_{k} + d_{k+1}
+            # u_{k+1} = - gain * (A.T * Q * A + pho * H)^(-1) * A.T * Q * y_{k+1}
+            # For the negative sign above, follow:
+            # https://confluence.lsstcorp.org/pages/viewpage.action?pageId=64698465
+
             # The offset will only trace the previous one in "_x0" type.
+            # The offset will trace the real value and target for 0 in "_0" type.
             # The offset will only trace the relative changes of offset without 
             # regarding the real value in "_x00" type. 
 
+            # For the notaions in the following equations:
+            # F = (A.T * Q * A + pho * H)^(-1)
+            # x = A.T * Q * y_{k+1}. It is noted that the weighting is included in x for the simplification
+
+            # Check the idea of "0" and "x00" with Bo. It does not look like the description in 
+            # https://confluence.lsstcorp.org/pages/viewpage.action?pageId=60948764
             if self.xref in ("x0", "x0xcor"):
-                self.uk[esti.dofIdx] = - gainUse * self.mF.dot(Mx)
+                # uk = u_{k+1} = - gain * F * xhat_{k+1}
+                self.uk[esti.dofIdx] = -gainUse * self.mF.dot(Mx)
             
             elif (self.xref == "0"):
+                # uk = gain * F * ( -rho^2 * H * x_{k} - xhat_{k+1} )
                 self.uk[esti.dofIdx] = gainUse * self.mF.dot(
                     -self.rho**2 * self.mH.dot(state.stateV[esti.dofIdx]) - Mx)
             
             elif (self.xref == "x00"):
+                # uk = gain * F * [ rho^2 * H * (x_{0} - x_{k}) - xhat_{k+1} ]
+                # Check this one with Bo. state.stateV0 is hard coded to use "iter0_pert.mat", which is zero actually.
+                # Based on this point, there is no different between "0" and "x00" here.
                 self.uk[esti.dofIdx] = gainUse * self.mF.dot(
-                    self.rho**2 * self.mH.dot(state.stateV0[esti.dofIdx] -
-                                              state.stateV[esti.dofIdx]) - Mx)
+                    self.rho**2 * self.mH.dot(state.stateV0[esti.dofIdx] - state.stateV[esti.dofIdx]) - Mx)
 
     def drawControlPanel(self, esti, state):
 
@@ -642,7 +667,7 @@ class aosController(object):
         leg.get_frame().set_alpha(0.5)
 
         # 4: M1M3 bending
-        rms = np.std(allPert[10:esti.nB13Max + 10, :], axis=1)
+        rms = np.std(allPert[10: 10 + esti.nB13Max, :], axis=1)
         idx = np.argsort(rms)
         for i in range(1, 4 + 1):
             ax[1, 0].plot(myxticks, allPert[idx[-i] + 10, :],
@@ -677,7 +702,7 @@ class aosController(object):
                           (idx[-i] + 1), marker='.', color=colors[i - 1],
                           markersize=10)
         for i in range(4, esti.nB2Max + 1):
-            ax[1, 1].plot(myxticks, allPert[idx[-i] + 10 + esti.nB13Max,
+            ax[1, 1].plot(myxticks, allPert[idx[-i] + 10 + 20,
                                             :], marker='.', color=colors[-1],
                           markersize=10)
         ax[1, 1].set_xlim(np.min(myxticks) - 0.5, np.max(myxticks) + 0.5)
@@ -686,7 +711,7 @@ class aosController(object):
         ax[1, 1].set_xlabel('iteration')
         ax[1, 1].set_ylabel('$\mu$m')
         allF = M2.force[:, :esti.nB2Max].dot(
-            allPert[10 + esti.nB13Max:esti.ndofA, :])
+            allPert[10 + 20:esti.ndofA, :])
         stdForce = np.std(allF, axis=0)
         maxForce = np.max(allF, axis=0)
         ax[1, 1].set_title('Max %d/$\pm$%dN; RMS %dN' % (

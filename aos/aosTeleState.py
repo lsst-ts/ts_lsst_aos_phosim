@@ -1204,7 +1204,7 @@ def gridSamp(xf, yf, zf, innerR, outerR, resFile, nx, ny, plots):
         # the input data to gridSamp.m is in mm (zemax default)
         sc = ax[1].scatter(xf, yf, s=25, c=zf*1e6, marker='.', edgecolor='none')
         ax[1].axis('equal')
-        ax[1].set_title('Surface map (nm)')
+        ax[1].set_title('Surface map on FEA grid (nm)')
         ax[1].set_xlim([-outerR, outerR])
         ax[1].set_ylim([-outerR, outerR])
         ax[1].set_xlabel('x (mm)')
@@ -1218,7 +1218,7 @@ def gridSamp(xf, yf, zf, innerR, outerR, resFile, nx, ny, plots):
         sc = ax[0].scatter(xp, yp, s=25, c=zp*1e6, marker='.',
                              edgecolor='none')
         ax[0].axis('equal')
-        ax[0].set_title('After linear interpolation (nm)')
+        ax[0].set_title('grid input to ZEMAX (nm)')
         ax[0].set_xlim([-outerR, outerR])
         ax[0].set_ylim([-outerR, outerR])
         ax[0].set_xlabel('x (mm)')

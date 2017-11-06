@@ -126,7 +126,7 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
                          M1M3.force, M2.force, effwave, args.gain, covM=wfs.covM, 
                          debugLevel=args.debugLevel)
 
-    # return
+    return
 
     # *****************************************
     # start the Loop
@@ -147,7 +147,7 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
             # Update the telescope status
             if (iIter > 0):
                 esti.estimate(state, wfs, ctrl.y2File, args.sensor, authority=ctrl.Authority)
-                ctrl.getMotions(esti, metr, wfs, state)
+                ctrl.getMotions(esti, metr, nWFS=wfs.nWFS, state=state)
                 ctrl.drawControlPanel(esti, state)
 
                 # Need to remake the pert file here.
