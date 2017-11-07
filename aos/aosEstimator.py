@@ -468,7 +468,7 @@ class aosEstimator(object):
             # the next movement (getMotions()).
             self.xhat[self.dofIdx] = np.reshape(self.Ainv.dot(z_k), -1)
         
-            # Put the effection of authority back
+            # Put the affection of authority back
             # Anorm = A * authority
             # xhat = pinv(Anorm) * y * authority
             if (self.strategy == "pinv" and self.normalizeA):
