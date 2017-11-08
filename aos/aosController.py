@@ -412,6 +412,8 @@ class aosController(object):
 
     def drawControlPanel(self, esti, state):
 
+        # This is for the lsst camera only. Check with Bo for this.
+
         # Draw the control panel to show each subsystem's offset
         plt.figure(figsize=(15, 10))
 
@@ -888,21 +890,22 @@ def showControlPanel(uk=None, yfinal=None, yresi=None, iterNum=None, saveFilePat
         termZk = int(len(yfinal)/4)
 
     # Plot subsystems
-    __subsystemFigure(axm2rig, index=range(1,4), data=uk, marker="ro", annotation="M2 dz, dx, dy", ylabel="um")
-    __subsystemFigure(axm2rot, index=range(4,6), data=uk, marker="ro", annotation="M2 rx, ry", ylabel="arcsec")
-    __subsystemFigure(axcamrig, index=range(6,9), data=uk, marker="ro", annotation="Cam dz, dx, dy", ylabel="um")
-    __subsystemFigure(axcamrot, index=range(9,11), data=uk, marker="ro", annotation="Cam rx, ry", ylabel="arcsec")
-    __subsystemFigure(axm13, startIndex=1, index=range(11,31), data=uk, marker="ro", annotation="M1M3 bending", ylabel="um")
-    __subsystemFigure(axm2, startIndex=1, index=range(31,51), data=uk, marker="ro", annotation="M2 bending", ylabel="um")
+    __subsystemFigure(axm2rig, xticksStart=1, index=range(0,3), data=uk, marker="ro", annotation="M2 dz, dx, dy", ylabel="um")
+    __subsystemFigure(axm2rot, xticksStart=4, index=range(3,5), data=uk, marker="ro", annotation="M2 rx, ry", ylabel="arcsec")
+    __subsystemFigure(axcamrig, xticksStart=6, index=range(5,8), data=uk, marker="ro", annotation="Cam dz, dx, dy", ylabel="um")
+    __subsystemFigure(axcamrot, xticksStart=9, index=range(8,10), data=uk, marker="ro", annotation="Cam rx, ry", ylabel="arcsec")
+    __subsystemFigure(axm13, xticksStart=1, index=range(10,30), data=uk, marker="ro", annotation="M1M3 bending", ylabel="um")
+    __subsystemFigure(axm2, xticksStart=1, index=range(30,50), data=uk, marker="ro", annotation="M2 bending", ylabel="um")
 
-    if (yfinal is not None):
+    if ((yfinal is not None) and (termZk is not None)):
         label = None
         if (iterNum is not None):
             label = "iter %d" % (iterNum-1)
-        __subsystemFigure(axz1, startIndex=4, index=range(0, termZk), data=yfinal, annotation="Zernikes R44", ylabel="um", marker="*b", label=label)
-        __subsystemFigure(axz2, startIndex=4, index=range(termZk, 2*termZk), data=yfinal, annotation="Zernikes R40", ylabel="um", marker="*b")
-        __subsystemFigure(axz3, startIndex=4, index=range(2*termZk, 3*termZk), data=yfinal, annotation="Zernikes R00", ylabel="um", marker="*b")
-        __subsystemFigure(axz4, startIndex=4, index=range(3*termZk, 4*termZk), data=yfinal, annotation="Zernikes R04", ylabel="um", marker="*b")
+        __wavefrontFigure([axz1, axz2, axz3, axz4], yfinal, termZk, marker="*b-", label=label)
+
+    if ((yresi is not None) and (termZk is not None)):
+        label = "if full correction applied"
+        __wavefrontFigure([axz1, axz2, axz3, axz4], yresi, termZk, marker="*r-", label=label)
 
     # Save the image or not
     if (doWrite):
@@ -912,22 +915,44 @@ def showControlPanel(uk=None, yfinal=None, yresi=None, iterNum=None, saveFilePat
     else:
         plt.show()
 
-def __subsystemFigure(subPlot, startIndex=None, index=None, data=None, marker="b", annotation=None, ylabel=None, label=None):
+def __wavefrontFigure(subPlotList, wavefront, termZk, marker="*b", label=None):
+
+    __subsystemFigure(subPlotList[0], xticksStart=4, index=range(0, termZk), data=wavefront, annotation="Zernikes R44", ylabel="um", marker=marker, label=label)
+    __subsystemFigure(subPlotList[1], xticksStart=4, index=range(termZk, 2*termZk), data=wavefront, annotation="Zernikes R40", ylabel="um", marker=marker)
+    __subsystemFigure(subPlotList[2], xticksStart=4, index=range(2*termZk, 3*termZk), data=wavefront, annotation="Zernikes R00", ylabel="um", marker=marker)
+    __subsystemFigure(subPlotList[3], xticksStart=4, index=range(3*termZk, 4*termZk), data=wavefront, annotation="Zernikes R04", ylabel="um", marker=marker)
+
+def __subsystemFigure(subPlot, xticksStart=None, index=None, data=None, marker="b", annotation=None, ylabel=None, label=None):
+    """
+    
+    Sublplot the figure of evaluated offset (uk) for each subsystem (M2 haxapod, camera hexapod, 
+    M1M3 bending mode, M2 bending mode).
+    
+    Arguments:
+        subPlot {[matplotlib.axes]} -- Subplot of subsystem.
+    
+    Keyword Arguments:
+        xticksStart {[float]} -- x-axis start sticks. (default: {None})
+        index {[list]} -- Index of values needed in the data. (default: {None})
+        data {[list]} -- Data to show. (default: {None})
+        marker {str} -- Marker of plot. (default: {"b"})
+        annotation {[str]} -- Annotation put in figure. (default: {None})
+        ylabel {[str]} -- Label in y-axis. (default: {None})
+        label {[str]} -- Label of plot. (default: {None})
+    """
 
     if ((index is not None) and (data is not None)):
-        # Get the data related to the index
-        indexX = [int(ii-1) for ii in index]
 
         # Plot the figure
-        subPlot.plot(index, data[indexX], marker, ms=8, label=label)
+        subPlot.plot(index, data[index], marker, ms=8, label=label)
 
         subPlot.set_xticks(index)
         subPlot.set_xlim(np.min(index) - 0.5, np.max(index) + 0.5)
 
         # Label the x ticks
-        if (startIndex is not None):
+        if (xticksStart is not None):
             # Shift the labeling
-            index = [ii-index[0]+startIndex for ii in index]
+            index = [ii-index[0]+xticksStart for ii in index]
 
         xticklabels = [str(ii) for ii in index]
         subPlot.set_xticklabels(xticklabels)
@@ -948,5 +973,5 @@ if __name__ == "__main__":
     uk = np.arange(50)
     yfinal = np.arange(19*4)
     iterNum = 5
-    yresi = np.arange(19*4)
-    showControlPanel(uk=None, yfinal=yfinal, iterNum=iterNum, doWrite=False)
+    yresi = np.arange(19*4)*3
+    showControlPanel(uk=uk, yfinal=yfinal, yresi=yresi, iterNum=iterNum, doWrite=False)
