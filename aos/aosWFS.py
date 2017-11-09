@@ -159,6 +159,8 @@ class aosWFS(object):
                                 (default: {0})
         """
 
+        # This function should be modified to use the WEP package for general use. Check this with Bo.
+
         # Get the instrument name
         instName, defocalOffset = getInstName(state.inst)
 

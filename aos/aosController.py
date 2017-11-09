@@ -855,6 +855,8 @@ class aosController(object):
 
 def showControlPanel(uk=None, yfinal=None, yresi=None, iterNum=None, saveFilePath=None, doWrite=True):
 
+    # The original code by Bo looks like can only use for lsst wfs. Check this with Bo for ComCam Condition.
+
     # Draw the control panel to show each subsystem's offset
     plt.figure(figsize=(15, 10))
 
@@ -889,7 +891,7 @@ def showControlPanel(uk=None, yfinal=None, yresi=None, iterNum=None, saveFilePat
     elif (yresi is not None):
         termZk = int(len(yfinal)/4)
 
-    # Plot subsystems
+    # Plot the degree of freedom for each subsystem
     __subsystemFigure(axm2rig, xticksStart=1, index=range(0,3), data=uk, marker="ro", annotation="M2 dz, dx, dy", ylabel="um")
     __subsystemFigure(axm2rot, xticksStart=4, index=range(3,5), data=uk, marker="ro", annotation="M2 rx, ry", ylabel="arcsec")
     __subsystemFigure(axcamrig, xticksStart=6, index=range(5,8), data=uk, marker="ro", annotation="Cam dz, dx, dy", ylabel="um")
@@ -897,15 +899,18 @@ def showControlPanel(uk=None, yfinal=None, yresi=None, iterNum=None, saveFilePat
     __subsystemFigure(axm13, xticksStart=1, index=range(10,30), data=uk, marker="ro", annotation="M1M3 bending", ylabel="um")
     __subsystemFigure(axm2, xticksStart=1, index=range(30,50), data=uk, marker="ro", annotation="M2 bending", ylabel="um")
 
+    # Plot the wavefront error
+    subPlotList = [axz1, axz2, axz3, axz4]
+    annotationList = ["Zernikes R44", "Zernikes R40", "Zernikes R00", "Zernikes R04"]
     if ((yfinal is not None) and (termZk is not None)):
         label = None
         if (iterNum is not None):
             label = "iter %d" % (iterNum-1)
-        __wavefrontFigure([axz1, axz2, axz3, axz4], yfinal, termZk, marker="*b-", label=label)
+        __wavefrontFigure(subPlotList, annotationList, yfinal, termZk, marker="*b-", xticksStart=4, label=label)
 
     if ((yresi is not None) and (termZk is not None)):
         label = "if full correction applied"
-        __wavefrontFigure([axz1, axz2, axz3, axz4], yresi, termZk, marker="*r-", label=label)
+        __wavefrontFigure(subPlotList, annotationList, yresi, termZk, marker="*r-", xticksStart=4, label=label)
 
     # Save the image or not
     if (doWrite):
@@ -915,12 +920,32 @@ def showControlPanel(uk=None, yfinal=None, yresi=None, iterNum=None, saveFilePat
     else:
         plt.show()
 
-def __wavefrontFigure(subPlotList, wavefront, termZk, marker="*b", label=None):
+def __wavefrontFigure(subPlotList, annotationList, wavefront, termZk, marker="b", xticksStart=None, label=None):
+    """
+    
+    Plot the wavefront error in the basis of annular Zk begins from Z4 for each wavefront sensor (WFS).
+    
+    Arguments:
+        subPlotList {[list]} -- The list of subplots of WFS.
+        annotationList {[list]} -- The annotation list of WFS. The idea is to use the name of WFS.
+        wavefront {[ndarray]} -- Wavefront error in the basis of annular Zk.
+        termZk {[int]} -- Number of terms of annular Zk.
+    
+    Keyword Arguments:
+        marker {str} -- Maker of data point. (default: {"b"})
+        xticksStart {[float]} -- x-axis start sticks. (default: {None})
+        label {[str]} -- Label of data. (default: {None})
+    
+    Raises:
+        RuntimeError -- The lengths of subPlotList and nameList do not match.
+    """
 
-    __subsystemFigure(subPlotList[0], xticksStart=4, index=range(0, termZk), data=wavefront, annotation="Zernikes R44", ylabel="um", marker=marker, label=label)
-    __subsystemFigure(subPlotList[1], xticksStart=4, index=range(termZk, 2*termZk), data=wavefront, annotation="Zernikes R40", ylabel="um", marker=marker)
-    __subsystemFigure(subPlotList[2], xticksStart=4, index=range(2*termZk, 3*termZk), data=wavefront, annotation="Zernikes R00", ylabel="um", marker=marker)
-    __subsystemFigure(subPlotList[3], xticksStart=4, index=range(3*termZk, 4*termZk), data=wavefront, annotation="Zernikes R04", ylabel="um", marker=marker)
+    if (len(subPlotList) != len(annotationList)):
+        raise RuntimeError("The lengths of subPlotList and nameList do not match.")
+
+    for ii in range(len(subPlotList)):
+        __subsystemFigure(subPlotList[ii], xticksStart=xticksStart, index=range(ii*int(termZk), (ii+1)*int(termZk)), data=wavefront, 
+                          annotation=annotationList[ii], ylabel="um", marker=marker, label=label)
 
 def __subsystemFigure(subPlot, xticksStart=None, index=None, data=None, marker="b", annotation=None, ylabel=None, label=None):
     """
