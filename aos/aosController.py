@@ -854,6 +854,22 @@ class aosController(object):
                         os.remove(sumPlotFile)
 
 def showControlPanel(uk=None, yfinal=None, yresi=None, iterNum=None, saveFilePath=None, doWrite=True):
+    """
+    
+    Plot the figure of degree of freedom for each subsystem and the wavefront error on each wavefront 
+    sensor. It is noted that this function has been hardcoded for LSST wavefront sensor to use. Need to 
+    update this function for random WFS later.
+    
+    Keyword Arguments:
+        uk {[ndarray]} -- Predicted offset for each subsystem in the basis of degree of freedom. 
+                          (default: {None})
+        yfinal {[ndarray]} -- Wavefront error in the basis of Zk. (default: {None})
+        yresi {[ndarray]} -- Residue of wavefront error in the basis of Zk if full correction is applied. 
+                            (default: {None})
+        iterNum {[int]} -- Iteration number. (default: {None})
+        saveFilePath {[str]} -- File path to save the figure. (default: {None})
+        doWrite {bool} -- Write the figure into the file or not. (default: {True})
+    """
 
     # The original code by Bo looks like can only use for lsst wfs. Check this with Bo for ComCam Condition.
 
@@ -861,6 +877,7 @@ def showControlPanel(uk=None, yfinal=None, yresi=None, iterNum=None, saveFilePat
     plt.figure(figsize=(15, 10))
 
     # Arrangement of figure
+    # The following part is hard-coded for LSST WFS actually. Need to update this later.
 
     # Rigid body motions: piston, x-tilt, y-tilt, x-rotation, y-rotation
     # M2 hexapod: (dz, dx, dy) and (rx, ry)
@@ -902,12 +919,16 @@ def showControlPanel(uk=None, yfinal=None, yresi=None, iterNum=None, saveFilePat
     # Plot the wavefront error
     subPlotList = [axz1, axz2, axz3, axz4]
     annotationList = ["Zernikes R44", "Zernikes R40", "Zernikes R00", "Zernikes R04"]
+
+    # Plot the final wavefront error in the basis of Zk
     if ((yfinal is not None) and (termZk is not None)):
         label = None
         if (iterNum is not None):
             label = "iter %d" % (iterNum-1)
         __wavefrontFigure(subPlotList, annotationList, yfinal, termZk, marker="*b-", xticksStart=4, label=label)
 
+    # Plot the residue of wavefront error if full correction of wavefront error is applied
+    # This is for the performance prediction only
     if ((yresi is not None) and (termZk is not None)):
         label = "if full correction applied"
         __wavefrontFigure(subPlotList, annotationList, yresi, termZk, marker="*r-", xticksStart=4, label=label)
@@ -923,7 +944,7 @@ def showControlPanel(uk=None, yfinal=None, yresi=None, iterNum=None, saveFilePat
 def __wavefrontFigure(subPlotList, annotationList, wavefront, termZk, marker="b", xticksStart=None, label=None):
     """
     
-    Plot the wavefront error in the basis of annular Zk begins from Z4 for each wavefront sensor (WFS).
+    Plot the wavefront error in the basis of annular Zk for each wavefront sensor (WFS).
     
     Arguments:
         subPlotList {[list]} -- The list of subplots of WFS.
