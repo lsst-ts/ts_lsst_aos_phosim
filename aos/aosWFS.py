@@ -118,7 +118,7 @@ class aosWFS(object):
         self.intrinsicWFS = intrinsicAll[-self.nWFS:, 3:self.znwcs].reshape((-1, 1))
 
         # Read the covariance matrix in unit of nm^2
-        # Check this is the covariance matrix or not with Bo.
+        # Covariance matrix with 86 runs.
         covMFilePath = os.path.join(aosDataDir, "covM86.txt")
         self.covM = np.loadtxt(covMFilePath)
 
@@ -159,7 +159,7 @@ class aosWFS(object):
                                 (default: {0})
         """
 
-        # This function should be modified to use the WEP package for general use. Check this with Bo.
+        # This function should be modified to use the WEP package for general use.
 
         # Get the instrument name
         instName, defocalOffset = getInstName(state.inst)
@@ -476,7 +476,8 @@ class aosWFS(object):
         # Exposure 0
         z4c = np.loadtxt(self.zFile[0])
         
-        # Exposure 1 --> Need tp check with Bo. For the ComCam, this file should not exist.
+        # Exposure 1 --> This part has no error for ComCam. Need to check the second file of ComCam condition.
+
         z4cE001 = np.loadtxt(self.zFile[1])
         
         # Read the Zk truth file based on the fitting of OPD from PhoSim

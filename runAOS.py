@@ -228,6 +228,9 @@ def __setParseAugs():
     parser.add_argument("-end", dest="enditer", type=int, default=5, help=helpDescript)
 
     # Sensor type
+    # Ideal: Do not use PhoSim to generate wavefront image. Predict wavefront Zk directly.
+    # covM: Add the random number to calculated Zk from iteration 0.
+    # Ref: https://confluence.lsstcorp.org/pages/viewpage.action?pageId=64699925
     sensorChoices = ("ideal", "covM", "phosim", "cwfs", "check", "pass")
     helpDescript = "ideal: use true wavefront in estimator;\
                     covM: use covariance matrix to estimate wavefront;\

@@ -412,7 +412,7 @@ class aosController(object):
 
     def drawControlPanel(self, esti, state):
 
-        # This is for the lsst camera only. Check with Bo for this.
+        # This is for the lsst camera only.
 
         # Draw the control panel to show each subsystem's offset
         plt.figure(figsize=(15, 10))

@@ -134,7 +134,7 @@ class aosEstimator(object):
             # This command needs more study to check how to decide the inf number.
             self.Ainv = pinv_truncate(self.Anorm, self.nSingularInf)
         
-        # Check with Bo for these: "opti" and "crude_opti"
+        # "opti" = "optimal estimator"
         elif self.strategy in ("opti", "kalman"):
 
             # Empirical estimates (by Doug M.), not used when self.fmotion<0
@@ -145,7 +145,8 @@ class aosEstimator(object):
             if (self.strategy == "opti"):
 
                 # A^(-1) = X * A.T * ( A * X * A.T + M )^(-1)
-                # Not understand here. Check with Bo. There is another optiAinv() with different X 
+                # M is W in paper actually.
+                # There is another optiAinv() with different X 
                 # and fluctuation motion.
                 self.Ainv = X.dot(self.Anorm.T).dot(np.linalg.pinv(self.Anorm.dot(X).dot(self.Anorm.T) + wfs.covM))
             
@@ -162,7 +163,6 @@ class aosEstimator(object):
         elif (self.strategy == "crude_opti"):
             # A^(-1) = A.T * (A * A.T + perturbation * I)^(-1)
             # This perturbation looks like to remove the problem of near-degeneracy.
-            # Need to check with Bo for the performance.
             # There is the left/ right inverse problems here.
             self.Ainv = self.Anorm.T.dot(np.linalg.pinv(self.Anorm.dot(self.Anorm.T) + 
                             self.reguMu * np.identity(self.Anorm.shape[0])))
@@ -309,8 +309,10 @@ class aosEstimator(object):
             authority {[ndarray]} -- Authority array for each DOF.
         """
 
-        # Check with Bo the reason to normalize A based on the authority.
-        # This does not make sense to me.
+        # This is to avoid the unit difference to define the authority. The unit might affect 
+        # the pseudo-inverse numerical calculation. This is to avoid the condition such as 
+        # nm and um difference. 
+        # This needs more study to be the baseline. 
         
         # Normalize the element of A based on the level of authority
         # The dimension of Ause is n x m. The authority array is 1 x m after the reshape.
@@ -331,16 +333,13 @@ class aosEstimator(object):
             covM {[ndarray]} -- Covariance matrix of wavefront sensor.
         """
 
-        # Not understand why we need to construct a new Ainv matrix here which is different with
-        # the Ainv in the ini function. Check with Bo for this.
+        # Additional scope for the optimization. This needs more study to check the reliability.
 
         # Construct the X matrix
-        # Not understand the idea here. Check with Bo.
         dX = (ctrlRange * self.fmotion)**2
         X = np.diag(dX)
 
         # A^(-1) = X * A.T * ( A * X * A.T + M )^(-1)
-        # Not understand here. Check with Bo.
         self.Ainv = X.dot(self.Anorm.T).dot(np.linalg.pinv(self.Anorm.dot(X).dot(self.Anorm.T) + covM))
 
     def estimate(self, state, wfs, ctrlY2File, sensor, authority=None):
@@ -372,8 +371,7 @@ class aosEstimator(object):
 
             else:
 
-                # Collect all z4-zk in the specific band defined in GQwt.
-                # Check will Bo for this.
+                # Collect all z4-zk in the specific band defined in GQwt (Gaussain quadrature weights).
                 bb = np.zeros((wfs.znwcs, state.nOPDw))
 
                 for irun in range(state.nOPDw):
@@ -386,7 +384,7 @@ class aosEstimator(object):
   
                 # There is the problem here. GQwt is a dictionary and bb is a ndarray.
                 # At least, use aosTeleState.GQwt[bend] instead.
-                # Check this statement with Bo.
+                # Check this statement again.
                 self.yfinal = np.sum(aosTeleState.GQwt * bb)
 
             if (sensor == "covM"):
@@ -399,7 +397,6 @@ class aosEstimator(object):
                 np.random.seed(state.obsID)
                 
                 # Add the random samples from a multivariate normal distribution.
-                # Need to check with Bo for doing this.
                 self.yfinal += np.random.multivariate_normal(mu, wfs.covM).reshape(-1, 1)
         else:
 
@@ -412,7 +409,7 @@ class aosEstimator(object):
         self.yfinal -= wfs.intrinsicWFS
 
         # Subtract y2c.
-        # Do not understand this. Check with Bo for this one.
+        # y2c: correction. Zk offset between corner and center.
         y2cData = np.loadtxt(ctrlY2File)
 
         # Check with Bo for this. What is the meaning of dimension 1 in y2cData?

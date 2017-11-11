@@ -31,6 +31,7 @@ class aosTeleState(object):
 
     effwave = {'u': 0.365, 'g': 0.480, 'r': 0.622,
                'i': 0.754, 'z': 0.868, 'y': 0.973}
+    # Gaussain quadrature wavelength
     GQwave = {'u': [0.365], # place holder
               'g': [0.41826, 0.44901, 0.49371, 0.53752],
               'r': [0.55894, 0.59157, 0.63726, 0.68020],
