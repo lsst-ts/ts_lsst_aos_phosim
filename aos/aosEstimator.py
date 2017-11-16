@@ -60,9 +60,6 @@ class aosEstimator(object):
         # xhat = A.T * (A A.T)^(-1) * y
         self.xhat = np.zeros(self.ndofA)
 
-        self.yfinal = None
-        self.yresi = None
-
         # Get the instrument name
         instName, defocalOffset = getInstName(instruFile)
 
@@ -356,7 +353,17 @@ class aosEstimator(object):
         
         Keyword Arguments:
             authority {[ndarray]} -- Authority array for each DOF. (default: {None})
+
+        Returns:
+            [ndarray] -- Calculated Zk.
+            [ndarray] -- Residue Zk after the full correction.
         """
+
+        # Calculated Zk
+        yfinal = None
+
+        # Residue Zk after the full correction
+        yresi = None
 
         # Get z4-zk and put as y. This data is needed in "x = pinv(A) * y".
         if sensor in ("ideal",  "covM"):
@@ -367,7 +374,7 @@ class aosEstimator(object):
                 data = np.loadtxt(state.zTrueFile_m1)
 
                 # We only need z4-zk.
-                self.yfinal = data[-wfs.nWFS:, 3:self.znMax].reshape((-1, 1))
+                yfinal = data[-wfs.nWFS:, 3:self.znMax].reshape((-1, 1))
 
             else:
 
@@ -385,7 +392,7 @@ class aosEstimator(object):
                 # There is the problem here. GQwt is a dictionary and bb is a ndarray.
                 # At least, use aosTeleState.GQwt[bend] instead.
                 # Check this statement again.
-                self.yfinal = np.sum(aosTeleState.GQwt * bb)
+                yfinal = np.sum(aosTeleState.GQwt * bb)
 
             if (sensor == "covM"):
 
@@ -397,16 +404,16 @@ class aosEstimator(object):
                 np.random.seed(state.obsID)
                 
                 # Add the random samples from a multivariate normal distribution.
-                self.yfinal += np.random.multivariate_normal(mu, wfs.covM).reshape(-1, 1)
+                yfinal += np.random.multivariate_normal(mu, wfs.covM).reshape(-1, 1)
         else:
 
             # Read the file of z4-zk in the previous iteration
             # [0] for exp No. 0
             data = np.loadtxt(wfs.zFile_m1[0])
-            self.yfinal = data[:, :self.zn3Max].reshape((-1, 1))
+            yfinal = data[:, :self.zn3Max].reshape((-1, 1))
 
         # Get rid of the intrinsic WFS error
-        self.yfinal -= wfs.intrinsicWFS
+        yfinal -= wfs.intrinsicWFS
 
         # Subtract y2c.
         # y2c: correction. Zk offset between corner and center.
@@ -416,7 +423,7 @@ class aosEstimator(object):
         y2c = y2cData[-wfs.nWFS:, 0:self.znMax - 3].reshape((-1, 1))
 
         # Get the zk after the removing of affection from y2c
-        z_k = self.yfinal[self.zn3IdxAxnWFS] - y2c
+        z_k = yfinal[self.zn3IdxAxnWFS] - y2c
 
         # Do not sure to keep this part of Kalman filter or not. Check with Bo.
         if (self.strategy == "kalman"):
@@ -472,10 +479,12 @@ class aosEstimator(object):
                 self.xhat[self.dofIdx] = self.xhat[self.dofIdx]*authority
        
         # Define the y residure
-        self.yresi = self.yfinal - y2c
+        yresi = yfinal - y2c
 
         # y_resi := y_resi - A * xhat, where y = A * xhat
-        self.yresi += np.reshape(self.Ause.dot(-self.xhat[self.dofIdx]), (-1, 1))
+        yresi += np.reshape(self.Ause.dot(-self.xhat[self.dofIdx]), (-1, 1))
+
+        return yfinal, yresi
 
 def pinv_truncate(A, n=0):
     """

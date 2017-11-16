@@ -315,12 +315,15 @@ class aosController(object):
         Keyword Arguments:
             nWFS {[int]} -- Number of wavefront sensor. (default: {None})
             state {[aosTeleState]} -- aosTeleState object. (default: {None})
+    
+        Returns:
+            [ndarray] -- Predicted offsets to subsystems.
         """
 
         # Initialize the values.
         # Need to check to keep this part ot not in the final.
         # Use the "return" might be better in the future. Will change this in the refactoring.
-        self.uk = np.zeros(esti.ndofA)
+        uk = np.zeros(esti.ndofA)
 
         # Gain value to use in the run time
         # Use the higher gain value if the image quality is not good enough.
@@ -353,7 +356,7 @@ class aosController(object):
                 x_y2c = x_y2c * self.Authority
 
             # Calculate uk
-            self.uk[esti.dofIdx] = - gainUse * (esti.xhat[esti.dofIdx] + x_y2c)
+            uk[esti.dofIdx] = -gainUse * (esti.xhat[esti.dofIdx] + x_y2c)
 
         elif (self.strategy == "optiPSSN"):
 
@@ -396,19 +399,20 @@ class aosController(object):
             # https://confluence.lsstcorp.org/pages/viewpage.action?pageId=60948764
             if self.xref in ("x0", "x0xcor"):
                 # uk = u_{k+1} = - gain * F * xhat_{k+1}
-                self.uk[esti.dofIdx] = -gainUse * self.mF.dot(Mx)
+                uk[esti.dofIdx] = -gainUse * self.mF.dot(Mx)
 
             elif (self.xref == "0"):
                 # uk = gain * F * ( -rho^2 * H * x_{k} - xhat_{k+1} )
-                self.uk[esti.dofIdx] = gainUse * self.mF.dot(
-                    -self.rho**2 * self.mH.dot(state.stateV[esti.dofIdx]) - Mx)
+                uk[esti.dofIdx] = gainUse * self.mF.dot(-self.rho**2 * self.mH.dot(state.stateV[esti.dofIdx]) - Mx)
 
             elif (self.xref == "x00"):
                 # uk = gain * F * [ rho^2 * H * (x_{0} - x_{k}) - xhat_{k+1} ]
                 # Check this one with Bo. state.stateV0 is hard coded to use "iter0_pert.mat", which is zero actually.
                 # Based on this point, there is no different between "0" and "x00" here.
-                self.uk[esti.dofIdx] = gainUse * self.mF.dot(
-                    self.rho**2 * self.mH.dot(state.stateV0[esti.dofIdx] - state.stateV[esti.dofIdx]) - Mx)
+                uk[esti.dofIdx] = gainUse * self.mF.dot(
+                            self.rho**2 * self.mH.dot(state.stateV0[esti.dofIdx] - state.stateV[esti.dofIdx]) - Mx)
+
+        return uk
 
     def drawControlPanel(self, esti, state):
 

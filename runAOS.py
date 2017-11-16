@@ -18,6 +18,8 @@ from aos.aosM1M3 import aosM1M3
 from aos.aosM2 import aosM2
 from aos.aosTeleState import aosTeleState
 
+from aos.aosController import showControlPanel
+
 def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="offAxis"):
     """
 
@@ -142,13 +144,18 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
 
             # Update the telescope status
             if (iIter > 0):
-                esti.estimate(state, wfs, ctrl.y2File, args.sensor, authority=ctrl.Authority)
-                ctrl.getMotions(esti, metr, nWFS=wfs.nWFS, state=state)
-                ctrl.drawControlPanel(esti, state)
+                yfinal, yresi = esti.estimate(state, wfs, ctrl.y2File, args.sensor, authority=ctrl.Authority)
+                uk = ctrl.getMotions(esti, metr, nWFS=wfs.nWFS, state=state)
+
+                # Draw the dof and Zk 
+                controlPanelFigName = "sim%d_iter%d_ctrl.png" % (state.iSim, state.iIter)
+                controlPanelFigPath = os.path.join(pertDir, "iter%d" % state.iIter, controlPanelFigName)
+                showControlPanel(uk=uk, yfinal=yfinal, yresi=yresi, iterNum=state.iIter, 
+                                 saveFilePath=controlPanelFigPath, doWrite=True)
 
                 # Need to remake the pert file here.
                 # It will be inserted into OPD.inst, PSF.inst later
-                state.update(ctrl, M1M3, M2)
+                state.update(uk, ctrl.range, M1M3, M2)
 
             if (args.baserun > 0 and iIter == 0):
                 # Read the telescope status from the resetted baserun iteration

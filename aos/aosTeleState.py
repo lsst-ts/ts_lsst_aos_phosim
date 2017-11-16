@@ -292,12 +292,12 @@ class aosTeleState(object):
             distortion = distortion[[x - 1 for x in zidx]]
         setattr(self, distType, distortion)
 
-    def update(self, ctrl, M1M3=None, M2=None):
-        self.stateV += ctrl.uk
-        if np.any(self.stateV > ctrl.range):
-            ii = (self.stateV > ctrl.range).argmax()
+    def update(self, uk, ctrlRange, M1M3=None, M2=None):
+        self.stateV += uk
+        if np.any(self.stateV > ctrlRange):
+            ii = (self.stateV > ctrlRange).argmax()
             raise RuntimeError("ERROR: stateV[%d] = %e > its range = %e" % (
-                ii, self.stateV[ii], ctrl.range[ii]))
+                ii, self.stateV[ii], ctrlRange[ii]))
 
         # elevation is changing, the print through maps need to change
         if hasattr(self, 'M1M3surf'):
