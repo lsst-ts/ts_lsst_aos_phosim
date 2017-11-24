@@ -527,7 +527,6 @@ def pinv_truncate(A, n=0):
    
     return Ainv
 
-
 if __name__ == "__main__":
 
     pass

@@ -148,8 +148,11 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
                 uk = ctrl.getMotions(esti, metr, nWFS=wfs.nWFS, state=state)
 
                 # Draw the dof and Zk 
+                # File name and path
                 controlPanelFigName = "sim%d_iter%d_ctrl.png" % (state.iSim, state.iIter)
                 controlPanelFigPath = os.path.join(pertDir, "iter%d" % state.iIter, controlPanelFigName)
+                
+                # Generate the figure
                 showControlPanel(uk=uk, yfinal=yfinal, yresi=yresi, iterNum=state.iIter, 
                                  saveFilePath=controlPanelFigPath, doWrite=True)
 

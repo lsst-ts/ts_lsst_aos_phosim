@@ -89,13 +89,14 @@ class aosController(object):
         rbW = self.rbStroke[0]/self.rbStroke
 
         # Construct the authority array (H)
-        self.Authority = self.__getAuthorityH(rbW, M1M3Force, M2Force, esti.dofIdx, esti.nB13Max, esti.nB2Max)
+        self.Authority = self.__getAuthorityH(rbW, M1M3Force, M2Force, esti.dofIdx, 
+                                              esti.nB13Max, esti.nB2Max)
 
         # Calculate the range of motion of DOFs, which means there is no truncation of DOF.
         # range = 1/self.Authority*rbStroke[0]
         dofIdxNoTrunc = np.ones(len(esti.dofIdx), dtype=bool)
-
-        authorityNoTrunc = self.__getAuthorityH(rbW, M1M3Force, M2Force, dofIdxNoTrunc, esti.nB13Max, esti.nB2Max)
+        authorityNoTrunc = self.__getAuthorityH(rbW, M1M3Force, M2Force, dofIdxNoTrunc, 
+                                                esti.nB13Max, esti.nB2Max)
         self.range = 1/authorityNoTrunc*self.rbStroke[0]
 
         # Decide to modify the sensitivity matrix A based on the strategy or not
@@ -321,8 +322,6 @@ class aosController(object):
         """
 
         # Initialize the values.
-        # Need to check to keep this part ot not in the final.
-        # Use the "return" might be better in the future. Will change this in the refactoring.
         uk = np.zeros(esti.ndofA)
 
         # Gain value to use in the run time
@@ -413,172 +412,6 @@ class aosController(object):
                             self.rho**2 * self.mH.dot(state.stateV0[esti.dofIdx] - state.stateV[esti.dofIdx]) - Mx)
 
         return uk
-
-    def drawControlPanel(self, esti, state):
-
-        # This is for the lsst camera only.
-
-        # Draw the control panel to show each subsystem's offset
-        plt.figure(figsize=(15, 10))
-
-        # Arrangement of figure
-        # Rigid body motions: piston, x-tilt, y-tilt, x-rotation, y-rotation
-        # M2 hexapod: (dz, dx, dy) and (rx, ry)
-        axm2rig = plt.subplot2grid((4, 4), (0, 0))
-        axm2rot = plt.subplot2grid((4, 4), (0, 1))
-
-        # Camera hexapod: (dz, dx, dy) and (rx, ry)
-        axcamrig = plt.subplot2grid((4, 4), (0, 2))
-        axcamrot = plt.subplot2grid((4, 4), (0, 3))
-
-        # Rigid body motions
-        # M2 (dz, dx, dy)
-        myxticks = [1, 2, 3]
-        myxticklabels = ['%d' % (myxticks[i])
-                         for i in np.arange(len(myxticks))]
-        axm2rig.plot(myxticks, self.uk[[(i - 1)
-                                        for i in myxticks]], 'ro', ms=8)
-        axm2rig.set_xticks(myxticks)
-        axm2rig.set_xticklabels(myxticklabels)
-        axm2rig.grid()
-        axm2rig.annotate('M2 dz,dx,dy', xy=(0.3, 0.4),
-                         xycoords='axes fraction', fontsize=16)
-        axm2rig.set_ylabel('um')
-        axm2rig.set_xlim(np.min(myxticks) - 0.5, np.max(myxticks) + 0.5)
-
-        # M2 (rx, ry)
-        myxticks = [4, 5]
-        myxticklabels = ['%d' % (myxticks[i])
-                         for i in np.arange(len(myxticks))]
-        axm2rot.plot(myxticks, self.uk[[(i - 1)
-                                        for i in myxticks]], 'ro', ms=8)
-        axm2rot.set_xticks(myxticks)
-        axm2rot.set_xticklabels(myxticklabels)
-        axm2rot.grid()
-        axm2rot.annotate('M2 rx,ry', xy=(0.3, 0.4),
-                         xycoords='axes fraction', fontsize=16)
-        axm2rot.set_ylabel('arcsec')
-        axm2rot.set_xlim(np.min(myxticks) - 0.5, np.max(myxticks) + 0.5)
-
-        # Camera (dz, dx, dy)
-        myxticks = [6, 7, 8]
-        myxticklabels = ['%d' % (myxticks[i])
-                         for i in np.arange(len(myxticks))]
-
-        axcamrig.plot(myxticks, self.uk[[(i - 1)
-                                         for i in myxticks]], 'ro', ms=8)
-        axcamrig.set_xticks(myxticks)
-        axcamrig.set_xticklabels(myxticklabels)
-        axcamrig.grid()
-        axcamrig.annotate('Cam dz,dx,dy', xy=(0.3, 0.4),
-                          xycoords='axes fraction', fontsize=16)
-        axcamrig.set_ylabel('um')
-        axcamrig.set_xlim(np.min(myxticks) - 0.5, np.max(myxticks) + 0.5)
-
-        # Camera (rx, ry)
-        myxticks = [9, 10]
-        myxticklabels = ['%d' % (myxticks[i])
-                         for i in np.arange(len(myxticks))]
-        axcamrot.plot(myxticks, self.uk[[(i - 1)
-                                         for i in myxticks]], 'ro', ms=8)
-        axcamrot.set_xticks(myxticks)
-        axcamrot.set_xticklabels(myxticklabels)
-        axcamrot.grid()
-        axcamrot.annotate('Cam rx,ry', xy=(0.3, 0.4),
-                          xycoords='axes fraction', fontsize=16)
-        axcamrot.set_ylabel('arcsec')
-        axcamrot.set_xlim(np.min(myxticks) - 0.5, np.max(myxticks) + 0.5)
-
-        # m13 and m2 bending
-        axm13 = plt.subplot2grid((4, 4), (1, 0), colspan=2)
-        axm2 = plt.subplot2grid((4, 4), (1, 2), colspan=2)
-
-        myxticks = range(1, esti.nB13Max + 1)
-        myxticklabels = ['%d' % (myxticks[i])
-                         for i in np.arange(len(myxticks))]
-        axm13.plot(myxticks, self.uk[[(i - 1 + 10)
-                                      for i in myxticks]], 'ro', ms=8)
-        axm13.set_xticks(myxticks)
-        axm13.set_xticklabels(myxticklabels)
-        axm13.grid()
-        axm13.annotate('M1M3 bending', xy=(0.3, 0.4),
-                       xycoords='axes fraction', fontsize=16)
-        axm13.set_ylabel('um')
-        axm13.set_xlim(np.min(myxticks) - 0.5, np.max(myxticks) + 0.5)
-
-        myxticks = range(1, esti.nB2Max + 1)
-        myxticklabels = ['%d' % (myxticks[i])
-                         for i in np.arange(len(myxticks))]
-        axm2.plot(myxticks, self.uk[[(
-            i - 1 + 10 + esti.nB13Max) for i in myxticks]], 'ro', ms=8)
-        axm2.set_xticks(myxticks)
-        axm2.set_xticklabels(myxticklabels)
-        axm2.grid()
-        axm2.annotate('M2 bending', xy=(0.3, 0.4),
-                      xycoords='axes fraction', fontsize=16)
-        axm2.set_ylabel('um')
-        axm2.set_xlim(np.min(myxticks) - 0.5, np.max(myxticks) + 0.5)
-
-        # OPD zernikes before and after the FULL correction
-        # it goes like
-        #  2 1
-        #  3 4
-        axz1 = plt.subplot2grid((4, 4), (2, 2), colspan=2)
-        axz2 = plt.subplot2grid((4, 4), (2, 0), colspan=2)
-        axz3 = plt.subplot2grid((4, 4), (3, 0), colspan=2)
-        axz4 = plt.subplot2grid((4, 4), (3, 2), colspan=2)
-
-        z4up = range(4, esti.znMax + 1)
-        axz1.plot(z4up, esti.yfinal[:esti.zn3Max],
-                  label='iter %d' % (state.iIter - 1),
-                  marker='*', color='b', markersize=10)
-        axz1.plot(z4up, esti.yresi[:esti.zn3Max],
-                  label='if full correction applied',
-                  marker='*', color='r', markersize=10)
-        axz1.grid()
-        axz1.annotate('Zernikes R44', xy=(0.3, 0.4),
-                      xycoords='axes fraction', fontsize=16)
-        axz1.set_ylabel('um')
-        axz1.legend(loc="best", shadow=True, fancybox=True)
-        axz1.set_xlim(np.min(z4up) - 0.5, np.max(z4up) + 0.5)
-
-        axz2.plot(z4up, esti.yfinal[esti.zn3Max:2 * esti.zn3Max],
-                  marker='*', color='b', markersize=10)
-        axz2.plot(z4up, esti.yresi[esti.zn3Max:2 * esti.zn3Max],
-                  marker='*', color='r', markersize=10)
-        axz2.grid()
-        axz2.annotate('Zernikes R40', xy=(0.3, 0.4),
-                      xycoords='axes fraction', fontsize=16)
-        axz2.set_ylabel('um')
-        axz2.set_xlim(np.min(z4up) - 0.5, np.max(z4up) + 0.5)
-
-        axz3.plot(z4up, esti.yfinal[2 * esti.zn3Max:3 * esti.zn3Max],
-                  marker='*', color='b', markersize=10)
-        axz3.plot(z4up, esti.yresi[2 * esti.zn3Max:3 * esti.zn3Max],
-                  marker='*', color='r', markersize=10)
-        axz3.grid()
-        axz3.annotate('Zernikes R00', xy=(0.3, 0.4),
-                      xycoords='axes fraction', fontsize=16)
-        axz3.set_ylabel('um')
-        axz3.set_xlim(np.min(z4up) - 0.5, np.max(z4up) + 0.5)
-
-        axz4.plot(z4up, esti.yfinal[3 * esti.zn3Max:4 * esti.zn3Max],
-                  marker='*', color='b', markersize=10)
-        axz4.plot(z4up, esti.yresi[3 * esti.zn3Max:4 * esti.zn3Max],
-                  marker='*', color='r', markersize=10)
-        axz4.grid()
-        axz4.annotate('Zernikes R04', xy=(0.3, 0.4),
-                      xycoords='axes fraction', fontsize=16)
-        axz4.set_ylabel('um')
-        axz4.set_xlim(np.min(z4up) - 0.5, np.max(z4up) + 0.5)
-
-        plt.tight_layout()
-
-        # plt.show()
-        pngFile = '%s/iter%d/sim%d_iter%d_ctrl.png' % (
-            state.pertDir, state.iIter, state.iSim, state.iIter)
-        plt.savefig(pngFile, bbox_inches='tight')
-        plt.close()
 
     def drawSummaryPlots(self, state, metr, esti, M1M3, M2,
                          startIter, endIter, debugLevel):
@@ -857,6 +690,111 @@ class aosController(object):
                     if os.path.isfile(sumPlotFile):
                         os.remove(sumPlotFile)
 
+def showSummaryPlots(dataDir, dofRange=None, iSim=0, ndofA=50, nField=31, startIter=0, endIter=5, saveFilePath=None, doWrite=True):
+
+    # Number of iteration
+    numOfIter = endIter-startIter+1
+
+    # Data array initialization
+    allPert = np.zeros((ndofA, numOfIter))
+    allPSSN = np.zeros((nField+1, numOfIter))
+    allFWHMeff = np.zeros((nField+1, numOfIter))
+    alldm5 = np.zeros((nField+1, numOfIter))
+    allelli = np.zeros((nField+1, numOfIter))
+    allseeing = np.zeros(numOfIter)
+    allseeingvk = np.zeros(numOfIter)
+
+    # Perturbation directory
+    pertDir = "pert"
+
+    # Read the data
+    for iIter in range(startIter, endIter + 1):
+
+        # Simulation directory
+        simDir = "sim%d" % iSim
+
+        # Iteration directory
+        iterDir = "iter%d" % iIter
+
+        # Perturbation file name
+        fileName = "_".join((simDir, iterDir, pertDir))+".mat"
+        filePath = os.path.join(dataDir, pertDir, simDir, iterDir, fileName)
+        
+        # Read the data
+        allPert[:, iIter-startIter] = np.loadtxt(filePath)
+
+
+
+
+
+    # Draw the control panel to show each subsystem's offset
+    plt.figure(figsize=(15, 10))
+
+    # Arrangement of figure
+    axM2CamDz = plt.subplot2grid((3, 3), (0, 0))
+    axM2CamDxDy = plt.subplot2grid((3, 3), (0, 1))
+    axM2CamRxRy = plt.subplot2grid((3, 3), (0, 2))
+    axM1M3B = plt.subplot2grid((3, 3), (1, 0))
+    axM2B = plt.subplot2grid((3, 3), (1, 1))
+    axPSSN = plt.subplot2grid((3, 3), (1, 2))
+    axFWHMeff = plt.subplot2grid((3, 3), (2, 0))
+    axDm5 = plt.subplot2grid((3, 3), (2, 1))
+    axElli = plt.subplot2grid((3, 3), (2, 2))
+
+    # x tick
+    xticks = np.arange(startIter, endIter+1)
+
+    # Plot the figures
+    # 1: M2, cam dz
+    if (dofRange is not None):
+        title = "M2 %d/$\pm$%d$\mu$m; Cam %d/$\pm$%d$\mu$m" % (
+                round(np.max(np.absolute(allPert[0, :]))), dofRange[0],
+                round(np.max(np.absolute(allPert[5, :]))), dofRange[5])
+    else:
+        title = "M2 %d$\mu$m; Cam %d$\mu$m" % (round(np.max(np.absolute(allPert[0, :]))),
+                                               round(np.max(np.absolute(allPert[5, :]))))
+
+    __subsystemFigure(axM2CamDz, index=xticks, data=allPert[0, :], marker="r.-", 
+                      label="M2 dz", xlabel="iteration", ylabel="$\mu$m", 
+                      title=title, grid=False)
+    __subsystemFigure(axM2CamDz, index=xticks, data=allPert[5, :], marker="b.-", 
+                      label="Cam dz", grid=False)
+
+    # 2: M2, cam dx,dy
+    if (dofRange is not None):
+        title = "M2 %d/$\pm$%d$\mu$m; Cam %d/$\pm$%d$\mu$m" % (
+                round(np.max(np.absolute(allPert[1:3, :]))), dofRange[1],
+                round(np.max(np.absolute(allPert[6:8, :]))), dofRange[6])
+    else:
+        title = "M2 %d$\mu$m; Cam %d$\mu$m" % (round(np.max(np.absolute(allPert[1:3, :]))),
+                                               round(np.max(np.absolute(allPert[6:8, :]))))
+
+    __subsystemFigure(axM2CamDxDy, index=xticks, data=allPert[1, :], marker="r.-", 
+                      label="M2 dx", xlabel="iteration", ylabel="$\mu$m", title=title, 
+                      grid=False)
+    __subsystemFigure(axM2CamDxDy, index=xticks, data=allPert[2, :], marker="r*-", 
+                      label="M2 dy", grid=False)
+    __subsystemFigure(axM2CamDxDy, index=xticks, data=allPert[6, :], marker="b.-", 
+                      label="Cam dx", grid=False)
+    __subsystemFigure(axM2CamDxDy, index=xticks, data=allPert[7, :], marker="b*-", 
+                      label="Cam dy", grid=False)
+
+    # 3: M2, cam rx,ry
+
+  
+
+
+    __subsystemFigure(axM2CamRxRy, index=xticks, xlabel="iteration", ylabel="arcsec", title="M2CamRxRy", grid=False)
+    __subsystemFigure(axM1M3B, index=xticks, xlabel="iteration", ylabel="$\mu$m", title="M1M3 Bending", grid=False)
+    __subsystemFigure(axM2B, index=xticks, xlabel="iteration", ylabel="$\mu$m", title="M2 Bending", grid=False)
+    __subsystemFigure(axPSSN, index=xticks, xlabel="iteration", title="PSSN")
+    __subsystemFigure(axFWHMeff, index=xticks, xlabel="iteration", ylabel="arcsec", title="FWHM")
+    __subsystemFigure(axDm5, index=xticks, xlabel="iteration", title="Dm5")
+    __subsystemFigure(axElli, index=xticks, xlabel="iteration", ylabel="percent", title="Elli")
+
+    # Save the image or not
+    __saveFig(plt, saveFilePath=saveFilePath, doWrite=doWrite)
+
 def showControlPanel(uk=None, yfinal=None, yresi=None, iterNum=None, saveFilePath=None, doWrite=True):
     """
     
@@ -874,8 +812,6 @@ def showControlPanel(uk=None, yfinal=None, yresi=None, iterNum=None, saveFilePat
         saveFilePath {[str]} -- File path to save the figure. (default: {None})
         doWrite {bool} -- Write the figure into the file or not. (default: {True})
     """
-
-    # The original code by Bo looks like can only use for lsst wfs. Check this with Bo for ComCam Condition.
 
     # Draw the control panel to show each subsystem's offset
     plt.figure(figsize=(15, 10))
@@ -913,12 +849,18 @@ def showControlPanel(uk=None, yfinal=None, yresi=None, iterNum=None, saveFilePat
         termZk = int(len(yfinal)/4)
 
     # Plot the degree of freedom for each subsystem
-    __subsystemFigure(axm2rig, xticksStart=1, index=range(0,3), data=uk, marker="ro", annotation="M2 dz, dx, dy", ylabel="um")
-    __subsystemFigure(axm2rot, xticksStart=4, index=range(3,5), data=uk, marker="ro", annotation="M2 rx, ry", ylabel="arcsec")
-    __subsystemFigure(axcamrig, xticksStart=6, index=range(5,8), data=uk, marker="ro", annotation="Cam dz, dx, dy", ylabel="um")
-    __subsystemFigure(axcamrot, xticksStart=9, index=range(8,10), data=uk, marker="ro", annotation="Cam rx, ry", ylabel="arcsec")
-    __subsystemFigure(axm13, xticksStart=1, index=range(10,30), data=uk, marker="ro", annotation="M1M3 bending", ylabel="um")
-    __subsystemFigure(axm2, xticksStart=1, index=range(30,50), data=uk, marker="ro", annotation="M2 bending", ylabel="um")
+    __subsystemFigure(axm2rig, xticksStart=1, index=range(0,3), data=uk, marker="ro", 
+                      annotation="M2 dz, dx, dy", ylabel="$\mu$m")
+    __subsystemFigure(axm2rot, xticksStart=4, index=range(3,5), data=uk, marker="ro", 
+                      annotation="M2 rx, ry", ylabel="arcsec")
+    __subsystemFigure(axcamrig, xticksStart=6, index=range(5,8), data=uk, marker="ro", 
+                      annotation="Cam dz, dx, dy", ylabel="$\mu$m")
+    __subsystemFigure(axcamrot, xticksStart=9, index=range(8,10), data=uk, marker="ro", 
+                      annotation="Cam rx, ry", ylabel="arcsec")
+    __subsystemFigure(axm13, xticksStart=1, index=range(10,30), data=uk, marker="ro", 
+                      annotation="M1M3 bending", ylabel="$\mu$m")
+    __subsystemFigure(axm2, xticksStart=1, index=range(30,50), data=uk, marker="ro", 
+                      annotation="M2 bending", ylabel="$\mu$m")
 
     # Plot the wavefront error
     subPlotList = [axz1, axz2, axz3, axz4]
@@ -929,23 +871,49 @@ def showControlPanel(uk=None, yfinal=None, yresi=None, iterNum=None, saveFilePat
         label = None
         if (iterNum is not None):
             label = "iter %d" % (iterNum-1)
-        __wavefrontFigure(subPlotList, annotationList, yfinal, termZk, marker="*b-", xticksStart=4, label=label)
+        __wavefrontFigure(subPlotList, annotationList, yfinal, termZk, marker="*b-", 
+                          xticksStart=4, label=label)
 
     # Plot the residue of wavefront error if full correction of wavefront error is applied
     # This is for the performance prediction only
     if ((yresi is not None) and (termZk is not None)):
         label = "if full correction applied"
-        __wavefrontFigure(subPlotList, annotationList, yresi, termZk, marker="*r-", xticksStart=4, label=label)
+        __wavefrontFigure(subPlotList, annotationList, yresi, termZk, marker="*r-", 
+                          xticksStart=4, label=label)
 
     # Save the image or not
+    __saveFig(plt, saveFilePath=saveFilePath, doWrite=doWrite)
+
+def __saveFig(plotFig, saveFilePath=None, doWrite=True):
+    """
+    
+    Save the figure to specific path or just show the figure.
+    
+    Arguments:
+        plotFig {[matplotlib.pyplot]} -- Pyplot figure object.
+    
+    Keyword Arguments:
+        saveFilePath {[str]} -- File path to save the figure. (default: {None})
+        doWrite {bool} -- Write the figure into the file or not. (default: {True})
+    """
+
     if (doWrite):
         if (saveFilePath):
-            plt.savefig(saveFilePath, bbox_inches="tight")
-            plt.close()
-    else:
-        plt.show()
+            
+            # Adjust the space between xlabel and title for neighboring sub-figures
+            plotFig.tight_layout()
 
-def __wavefrontFigure(subPlotList, annotationList, wavefront, termZk, marker="b", xticksStart=None, label=None):
+            # Save the figure to file
+            plotFig.savefig(saveFilePath, bbox_inches="tight")
+
+            # Close the figure
+            plotFig.close()
+    else:
+        # Show the figure only
+        plotFig.show()
+
+def __wavefrontFigure(subPlotList, annotationList, wavefront, termZk, marker="b", 
+                      xticksStart=None, label=None):
     """
     
     Plot the wavefront error in the basis of annular Zk for each wavefront sensor (WFS).
@@ -969,10 +937,13 @@ def __wavefrontFigure(subPlotList, annotationList, wavefront, termZk, marker="b"
         raise RuntimeError("The lengths of subPlotList and nameList do not match.")
 
     for ii in range(len(subPlotList)):
-        __subsystemFigure(subPlotList[ii], xticksStart=xticksStart, index=range(ii*int(termZk), (ii+1)*int(termZk)), data=wavefront, 
+        __subsystemFigure(subPlotList[ii], xticksStart=xticksStart, 
+                          index=range(ii*int(termZk), (ii+1)*int(termZk)), data=wavefront, 
                           annotation=annotationList[ii], ylabel="um", marker=marker, label=label)
 
-def __subsystemFigure(subPlot, xticksStart=None, index=None, data=None, marker="b", annotation=None, ylabel=None, label=None):
+def __subsystemFigure(subPlot, xticksStart=None, index=None, data=None, marker="b", 
+                      annotation=None, xlabel=None, ylabel=None, label=None, title=None,
+                      grid=True):
     """
     
     Sublplot the figure of evaluated offset (uk) for each subsystem (M2 haxapod, camera hexapod, 
@@ -987,15 +958,20 @@ def __subsystemFigure(subPlot, xticksStart=None, index=None, data=None, marker="
         data {[list]} -- Data to show. (default: {None})
         marker {str} -- Marker of plot. (default: {"b"})
         annotation {[str]} -- Annotation put in figure. (default: {None})
+        xlabel {[str]} -- Label in x-axis. (default: {None})
         ylabel {[str]} -- Label in y-axis. (default: {None})
         label {[str]} -- Label of plot. (default: {None})
+        title {[str]} -- Title of plot. (default: {None})
+        grid {[bool]} -- Show the grid or not. (default: {True})
     """
 
+    # Get the data
     if ((index is not None) and (data is not None)):
-
         # Plot the figure
         subPlot.plot(index, data[index], marker, ms=8, label=label)
 
+    # Set x_ticks
+    if (index is not None):
         subPlot.set_xticks(index)
         subPlot.set_xlim(np.min(index) - 0.5, np.max(index) + 0.5)
 
@@ -1007,21 +983,39 @@ def __subsystemFigure(subPlot, xticksStart=None, index=None, data=None, marker="
         xticklabels = [str(ii) for ii in index]
         subPlot.set_xticklabels(xticklabels)
 
+    # Set the x lable
+    if (xlabel is not None):
+        subPlot.set_xlabel(xlabel)
+
+    # Set the y label
     if (ylabel is not None):
         subPlot.set_ylabel(ylabel)
 
+    # Set the annotation
     if (annotation is not None):
-        subPlot.annotate(annotation, xy = (0.3, 0.4), xycoords="axes fraction", fontsize=16)
+        subPlot.annotate(annotation, xy=(0.3, 0.4), xycoords="axes fraction", fontsize=16)
 
+    # Set the legend
     if (label is not None):
-        subPlot.legend(loc="best", shadow=True, fancybox=True)
+        subPlot.legend(loc="best", shadow=False, fancybox=True)
 
-    subPlot.grid()
+    # Set the title
+    if (title is not None):
+        subPlot.set_title(title)
+
+    # Set the grid
+    if (grid):
+        subPlot.grid()
 
 if __name__ == "__main__":
 
-    uk = np.arange(50)
-    yfinal = np.arange(19*4)
-    iterNum = 5
-    yresi = np.arange(19*4)*3
-    showControlPanel(uk=uk, yfinal=yfinal, yresi=yresi, iterNum=iterNum, doWrite=False)
+    # uk = np.arange(50)
+    # yfinal = np.arange(19*4)
+    # iterNum = 5
+    # yresi = np.arange(19*4)*3
+
+    dofRange = np.arange(0,51)*1e3
+
+    dataDir = "/Users/Wolf/Documents/aosOutput"
+    saveFilePath = "/Users/Wolf/Desktop/temp.png"
+    showSummaryPlots(dataDir, dofRange=None, iSim=6, startIter=0, endIter=5, saveFilePath=saveFilePath, doWrite=True)
