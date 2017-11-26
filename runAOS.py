@@ -79,11 +79,9 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
 
     # Instantiate mirrors
     M1M3dir = os.path.join(aosDataDir, "M1M3")
-    # M1M3dir = "data/M1M3"
     M1M3 = aosM1M3(M1M3dir, debugLevel=args.debugLevel)
 
     M2dir = os.path.join(aosDataDir, "M2")
-    # M2dir = "data/M2"
     M2 = aosM2(M2dir, debugLevel=args.debugLevel)
 
     # znPert = 28  # znmax used in pert file to define surfaces

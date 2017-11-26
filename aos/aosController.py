@@ -9,6 +9,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from aos.aosMetric import getInstName
+from aos.aosM1M3 import aosM1M3
+from aos.aosM2 import aosM2
 
 class aosController(object):
 
@@ -690,7 +692,10 @@ class aosController(object):
                     if os.path.isfile(sumPlotFile):
                         os.remove(sumPlotFile)
 
-def showSummaryPlots(dataDir, dofRange=None, iSim=0, ndofA=50, nField=31, startIter=0, endIter=5, saveFilePath=None, doWrite=True):
+def showSummaryPlots(dataDir, dofRange=None, iSim=0, ndofA=50, nField=31, 
+                     startIter=0, endIter=5, nB13Max=20, nB2Max=20, interestedBend=4, 
+                     rhoM13=5.9, M1M3ActForce=None, rhoM2=5.9, M2ActForce=None, 
+                     saveFilePath=None, doWrite=True):
 
     # Number of iteration
     numOfIter = endIter-startIter+1
@@ -706,6 +711,7 @@ def showSummaryPlots(dataDir, dofRange=None, iSim=0, ndofA=50, nField=31, startI
 
     # Perturbation directory
     pertDir = "pert"
+    imgDir = "image"
 
     # Read the data
     for iIter in range(startIter, endIter + 1):
@@ -717,12 +723,19 @@ def showSummaryPlots(dataDir, dofRange=None, iSim=0, ndofA=50, nField=31, startI
         iterDir = "iter%d" % iIter
 
         # Perturbation file name
-        fileName = "_".join((simDir, iterDir, pertDir))+".mat"
+        fileName = "_".join((simDir, iterDir, pertDir)) + ".mat"
         filePath = os.path.join(dataDir, pertDir, simDir, iterDir, fileName)
         
-        # Read the data
+        # Read the perturbation data
         allPert[:, iIter-startIter] = np.loadtxt(filePath)
 
+        # Read the PSSN/ opd related data
+        fileName = "_".join((simDir, iterDir, "PSSN")) + ".txt"
+        filePath = os.path.join(dataDir, imgDir, simDir, iterDir, fileName)
+        allData = np.loadtxt(filePath)
+
+        # Read the PSSN data
+        allPSSN[:, iIter - startIter] = allData[0, :]
 
 
 
@@ -746,6 +759,14 @@ def showSummaryPlots(dataDir, dofRange=None, iSim=0, ndofA=50, nField=31, startI
 
     # Plot the figures
     # 1: M2, cam dz
+
+    # Plot the data
+    __subsystemFigure(axM2CamDz, index=xticks, data=allPert[0, :], marker="r.-", 
+                      label="M2 dz")
+    __subsystemFigure(axM2CamDz, index=xticks, data=allPert[5, :], marker="b.-", 
+                      label="Cam dz")
+
+    # Label in figure
     if (dofRange is not None):
         title = "M2 %d/$\pm$%d$\mu$m; Cam %d/$\pm$%d$\mu$m" % (
                 round(np.max(np.absolute(allPert[0, :]))), dofRange[0],
@@ -754,13 +775,21 @@ def showSummaryPlots(dataDir, dofRange=None, iSim=0, ndofA=50, nField=31, startI
         title = "M2 %d$\mu$m; Cam %d$\mu$m" % (round(np.max(np.absolute(allPert[0, :]))),
                                                round(np.max(np.absolute(allPert[5, :]))))
 
-    __subsystemFigure(axM2CamDz, index=xticks, data=allPert[0, :], marker="r.-", 
-                      label="M2 dz", xlabel="iteration", ylabel="$\mu$m", 
+    __subsystemFigure(axM2CamDz, xlabel="iteration", ylabel="$\mu$m", 
                       title=title, grid=False)
-    __subsystemFigure(axM2CamDz, index=xticks, data=allPert[5, :], marker="b.-", 
-                      label="Cam dz", grid=False)
 
     # 2: M2, cam dx,dy
+    # Plot the data
+    __subsystemFigure(axM2CamDxDy, index=xticks, data=allPert[1, :], marker="r.-", 
+                      label="M2 dx")
+    __subsystemFigure(axM2CamDxDy, index=xticks, data=allPert[2, :], marker="r*-", 
+                      label="M2 dy")
+    __subsystemFigure(axM2CamDxDy, index=xticks, data=allPert[6, :], marker="b.-", 
+                      label="Cam dx")
+    __subsystemFigure(axM2CamDxDy, index=xticks, data=allPert[7, :], marker="b*-", 
+                      label="Cam dy")
+
+    # Label in figure
     if (dofRange is not None):
         title = "M2 %d/$\pm$%d$\mu$m; Cam %d/$\pm$%d$\mu$m" % (
                 round(np.max(np.absolute(allPert[1:3, :]))), dofRange[1],
@@ -769,25 +798,119 @@ def showSummaryPlots(dataDir, dofRange=None, iSim=0, ndofA=50, nField=31, startI
         title = "M2 %d$\mu$m; Cam %d$\mu$m" % (round(np.max(np.absolute(allPert[1:3, :]))),
                                                round(np.max(np.absolute(allPert[6:8, :]))))
 
-    __subsystemFigure(axM2CamDxDy, index=xticks, data=allPert[1, :], marker="r.-", 
-                      label="M2 dx", xlabel="iteration", ylabel="$\mu$m", title=title, 
+    __subsystemFigure(axM2CamDxDy, xlabel="iteration", ylabel="$\mu$m", title=title, 
                       grid=False)
-    __subsystemFigure(axM2CamDxDy, index=xticks, data=allPert[2, :], marker="r*-", 
-                      label="M2 dy", grid=False)
-    __subsystemFigure(axM2CamDxDy, index=xticks, data=allPert[6, :], marker="b.-", 
-                      label="Cam dx", grid=False)
-    __subsystemFigure(axM2CamDxDy, index=xticks, data=allPert[7, :], marker="b*-", 
-                      label="Cam dy", grid=False)
 
     # 3: M2, cam rx,ry
+    # Plot the data
+    __subsystemFigure(axM2CamRxRy, index=xticks, data=allPert[3, :], marker="r.-", 
+                      label="M2 rx")
+    __subsystemFigure(axM2CamRxRy, index=xticks, data=allPert[4, :], marker="r*-", 
+                      label="M2 ry")
+    __subsystemFigure(axM2CamRxRy, index=xticks, data=allPert[8, :], marker="b.-", 
+                      label="Cam rx")
+    __subsystemFigure(axM2CamRxRy, index=xticks, data=allPert[9, :], marker="b*-", 
+                      label="Cam ry")
 
-  
+    # Label in figure
+    if (dofRange is not None):
+        title = "M2 %d/$\pm$%darcsec; Cam %d/$\pm$%darcsec" % (
+                round(np.max(np.absolute(allPert[3:5, :]))), dofRange[3],
+                round(np.max(np.absolute(allPert[8:10, :]))), dofRange[8])
+    else:
+        title = "M2 %darcsec; Cam %darcsec" % (round(np.max(np.absolute(allPert[3:5, :]))), 
+                                               round(np.max(np.absolute(allPert[8:10, :]))))
+
+    __subsystemFigure(axM2CamRxRy, xlabel="iteration", ylabel="arcsec", 
+                      title=title, grid=False)
+
+    # 4: M1M3 bending
+
+    # Set the colors in figure 
+    myColors = ("r", "b", "g", "c", "m", "y", "k")
+
+    # Calculate the standard deviation of bending mode offset
+    rms = np.std(allPert[10: 10+nB13Max, :], axis=1)
+    idx = np.argsort(rms)
+
+    # Plot the data
+    for ii in range(interestedBend, nB13Max+1):
+        __subsystemFigure(axM1M3B, index=xticks, data=allPert[idx[-ii]+10, :], 
+                          marker=myColors[-1]+".-", grid=False)
+
+    for ii in range(1, interestedBend+1):
+       __subsystemFigure(axM1M3B, index=xticks, data=allPert[idx[-ii]+10, :], 
+                         marker=myColors[ii-1]+".-", label="M1M3 b%d" % (idx[-ii]+1), 
+                         grid=False)
+
+    # Label in figure
+    allF = M1M3ActForce[:, :nB13Max].dot(allPert[10:10+nB13Max, :])
+    stdForce = np.std(allF, axis=0)
+    maxForce = np.max(allF, axis=0)
+
+    if (dofRange is not None):
+        title = "Max %d/$\pm$%dN; RMS %dN" % (round(np.max(maxForce)), round(dofRange[0]/rhoM13),
+                                              round(np.max(stdForce)))
+    else:
+        title = "Max %dN; RMS %dN" % (round(np.max(maxForce)), round(np.max(stdForce)))
+
+    __subsystemFigure(axM1M3B, xlabel="iteration", ylabel="$\mu$m", 
+                      title=title, grid=False)
+
+    # 5: M2 bending
+
+    # Calculate the standard deviation of bending mode offset
+    rms = np.std(allPert[10+nB13Max: 10+nB13Max+nB2Max, :], axis=1)
+    idx = np.argsort(rms)
+
+    # Plot the data
+    for ii in range(interestedBend, nB2Max+1):
+        __subsystemFigure(axM2B, index=xticks, data=allPert[idx[-ii]+10+nB13Max, :], 
+                          marker=myColors[-1]+".-", grid=False)
+
+    for ii in range(1, interestedBend+1):
+       __subsystemFigure(axM2B, index=xticks, data=allPert[idx[-ii]+10+nB13Max, :], 
+                         marker=myColors[ii-1]+".-", label="M2 b%d" % (idx[-ii]+1), 
+                         grid=False)
+
+    # Label in figure
+    allF = M2ActForce[:, :nB2Max].dot(allPert[10+nB13Max:10+nB13Max+nB2Max, :])
+    stdForce = np.std(allF, axis=0)
+    maxForce = np.max(allF, axis=0)
+
+    if (dofRange is not None):
+        title = "Max %d/$\pm$%dN; RMS %dN" % (round(np.max(maxForce)), round(dofRange[0]/rhoM2),
+                                              round(np.max(stdForce)))
+    else:
+        title = "Max %dN; RMS %dN" % (round(np.max(maxForce)), round(np.max(stdForce)))
+
+    __subsystemFigure(axM2B, xlabel="iteration", ylabel="$\mu$m", 
+                      title=title, grid=False)
+
+    # 6: PSSN
+
+    # Plot the data
+    for ii in range(nField):
+        __subsystemFigure(axPSSN, index=xticks, data=1-allPSSN[ii, :], 
+                          marker="b.-", logPlot=True)
+    __subsystemFigure(axPSSN, index=xticks, data=1-allPSSN[-1, :], 
+                      marker="r.-", label="GQ(1-PSSN)", logPlot=True)
+
+    # Label in figure
+    if (allPSSN.shape[1] > 1):
+        title = "Last 2 PSSN: %5.3f, %5.3f" % (allPSSN[-1, -2], allPSSN[-1, -1])
+    else:
+        title = "Last PSSN: %5.3f" % allPSSN[-1, -1]
+    __subsystemFigure(axPSSN, xlabel="iteration", title=title)
+
+    # 7: FWHMeff
 
 
-    __subsystemFigure(axM2CamRxRy, index=xticks, xlabel="iteration", ylabel="arcsec", title="M2CamRxRy", grid=False)
-    __subsystemFigure(axM1M3B, index=xticks, xlabel="iteration", ylabel="$\mu$m", title="M1M3 Bending", grid=False)
-    __subsystemFigure(axM2B, index=xticks, xlabel="iteration", ylabel="$\mu$m", title="M2 Bending", grid=False)
-    __subsystemFigure(axPSSN, index=xticks, xlabel="iteration", title="PSSN")
+
+    # 8: dm5
+
+    # 9: elli
+
     __subsystemFigure(axFWHMeff, index=xticks, xlabel="iteration", ylabel="arcsec", title="FWHM")
     __subsystemFigure(axDm5, index=xticks, xlabel="iteration", title="Dm5")
     __subsystemFigure(axElli, index=xticks, xlabel="iteration", ylabel="percent", title="Elli")
@@ -942,8 +1065,8 @@ def __wavefrontFigure(subPlotList, annotationList, wavefront, termZk, marker="b"
                           annotation=annotationList[ii], ylabel="um", marker=marker, label=label)
 
 def __subsystemFigure(subPlot, xticksStart=None, index=None, data=None, marker="b", 
-                      annotation=None, xlabel=None, ylabel=None, label=None, title=None,
-                      grid=True):
+                      annotation=None, xlabel=None, ylabel=None, label=None, title=None, 
+                      logPlot=False, grid=True):
     """
     
     Sublplot the figure of evaluated offset (uk) for each subsystem (M2 haxapod, camera hexapod, 
@@ -962,13 +1085,17 @@ def __subsystemFigure(subPlot, xticksStart=None, index=None, data=None, marker="
         ylabel {[str]} -- Label in y-axis. (default: {None})
         label {[str]} -- Label of plot. (default: {None})
         title {[str]} -- Title of plot. (default: {None})
+        logPlot {[bool]} -- Plot in log scale. (default: {False})
         grid {[bool]} -- Show the grid or not. (default: {True})
     """
 
     # Get the data
     if ((index is not None) and (data is not None)):
-        # Plot the figure
-        subPlot.plot(index, data[index], marker, ms=8, label=label)
+        # Plot the figure in log scale or not
+        if (logPlot):
+            subPlot.semilogy(index, data[index], marker, ms=8, label=label)
+        else:
+            subPlot.plot(index, data[index], marker, ms=8, label=label)
 
     # Set x_ticks
     if (index is not None):
@@ -1014,8 +1141,17 @@ if __name__ == "__main__":
     # iterNum = 5
     # yresi = np.arange(19*4)*3
 
+    # Initiate the mirror actuator force
+    M1M3dir = "../data/M1M3"
+    M1M3 = aosM1M3(M1M3dir)
+
+    M2dir = "../data/M2"
+    M2 = aosM2(M2dir)
+
     dofRange = np.arange(0,51)*1e3
 
     dataDir = "/Users/Wolf/Documents/aosOutput"
     saveFilePath = "/Users/Wolf/Desktop/temp.png"
-    showSummaryPlots(dataDir, dofRange=None, iSim=6, startIter=0, endIter=5, saveFilePath=saveFilePath, doWrite=True)
+    showSummaryPlots(dataDir, dofRange=dofRange, iSim=6, startIter=0, endIter=5, 
+                     M1M3ActForce=M1M3.force, M2ActForce=M2.force, 
+                     saveFilePath=saveFilePath, doWrite=True)
