@@ -195,6 +195,10 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
                 if args.sensor in ("phosim", "cwfs", "check"):
                     wfs.checkZ4C(state, metr, args.debugLevel)
 
+    # Give the summary file name and path
+    sumFigName = "sim%d_iter%d-%d.png" % (state.iSim, args.startiter, args.enditer)
+    sumFigPath = os.path.join(pertDir, sumFigName)
+
     # Draw the summary plot
     ctrl.drawSummaryPlots(state, metr, esti, M1M3, M2, args.startiter, args.enditer, args.debugLevel)
 

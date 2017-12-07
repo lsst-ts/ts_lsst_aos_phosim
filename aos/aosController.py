@@ -694,8 +694,8 @@ class aosController(object):
 
 def showSummaryPlots(dataDir, dofRange=None, iSim=0, ndofA=50, nField=31, 
                      startIter=0, endIter=5, nB13Max=20, nB2Max=20, interestedBend=4, 
-                     rhoM13=5.9, M1M3ActForce=None, rhoM2=5.9, M2ActForce=None, 
-                     saveFilePath=None, doWrite=True):
+                     rhoM13=5.9, M1M3ActForce=None, rhoM2=5.9, M2ActForce=None, wavelength=0.5, 
+                     iqBudget=0.2, eBudget=None, saveFilePath=None, doWrite=True, debugLevel=0):
 
     # Number of iteration
     numOfIter = endIter-startIter+1
@@ -704,10 +704,9 @@ def showSummaryPlots(dataDir, dofRange=None, iSim=0, ndofA=50, nField=31,
     allPert = np.zeros((ndofA, numOfIter))
     allPSSN = np.zeros((nField+1, numOfIter))
     allFWHMeff = np.zeros((nField+1, numOfIter))
-    alldm5 = np.zeros((nField+1, numOfIter))
-    allelli = np.zeros((nField+1, numOfIter))
-    allseeing = np.zeros(numOfIter)
-    allseeingvk = np.zeros(numOfIter)
+    allDm5 = np.zeros((nField+1, numOfIter))
+    allSeeingVk = np.zeros(numOfIter)
+    allElli = np.zeros((nField+1, numOfIter))
 
     # Perturbation directory
     pertDir = "pert"
@@ -735,10 +734,44 @@ def showSummaryPlots(dataDir, dofRange=None, iSim=0, ndofA=50, nField=31,
         allData = np.loadtxt(filePath)
 
         # Read the PSSN data
-        allPSSN[:, iIter - startIter] = allData[0, :]
+        allPSSN[:, iIter-startIter] = allData[0, :]
 
+        # Read the effective FWHM data
+        allFWHMeff[:, iIter-startIter] = allData[1, :]
 
+        # Read the dm5 data
+        allDm5[:, iIter-startIter] = allData[2, :]
 
+        # Read the seeing data
+        fileName = "_".join((simDir, iterDir, "E000")) + ".atm"
+        filePath = os.path.join(dataDir, imgDir, simDir, iterDir, fileName)
+        seeingData = np.loadtxt(filePath, skiprows=1)
+
+        # Get the width of seeing 
+        w = seeingData[:,1]
+
+        # According to John, seeing = quadrature sum (each layer)
+        # Convert sigma into FWHM by multiplying with 2*sqrt(2*log(2))
+        allSeeing = np.sqrt(np.sum(w**2))*2*np.sqrt(2*np.log(2))
+
+        # According to John, weight L0 using seeing^2
+        L0eff =  np.sum(seeingData[:,2]*w**2) / np.sum(w**2)
+
+        # Calculate the radius at referenced wavelength (500 nm)
+        r0_500 = 0.976*0.5e-6/(allSeeing/3600/180*np.pi)
+        
+        # Calculate the radius at specific wavelength 
+        r0 = r0_500*(wavelength/0.5)**1.2
+        
+        # Get the seeing in arcsec
+        allSeeingVk[iIter-startIter] = 0.976*wavelength*1e-6\
+                                         /r0*np.sqrt(1-2.183*(r0/L0eff)**0.356)\
+                                         /np.pi*180*3600
+
+        # Read the ellipticity data
+        fileName = "_".join((simDir, iterDir, "elli")) + ".txt"
+        filePath = os.path.join(dataDir, imgDir, simDir, iterDir, fileName)
+        allElli[:, iIter-startIter] = np.loadtxt(filePath)
 
     # Draw the control panel to show each subsystem's offset
     plt.figure(figsize=(15, 10))
@@ -905,15 +938,72 @@ def showSummaryPlots(dataDir, dofRange=None, iSim=0, ndofA=50, nField=31,
 
     # 7: FWHMeff
 
+    # Plot the data
+    # Plot all effective FWHM in arcsec 
+    if (debugLevel >= 0):
+        for ii in range(nField):
+            __subsystemFigure(axFWHMeff, index=xticks, data=allFWHMeff[ii, :], marker="b.-")
+    __subsystemFigure(axFWHMeff, index=xticks, data=allFWHMeff[-1, :], marker="r.-", 
+                      label="GQ($FWHM_{eff}$)")
 
+    # Plot the seeing in arcsec
+    __subsystemFigure(axFWHMeff, index=xticks, data=allSeeingVk, marker="g.-", 
+                      label="seeing")
+
+    # Plot the error budget
+    __subsystemFigure(axFWHMeff, index=xticks, data=iqBudget*np.ones(len(xticks)), 
+                      marker="k-", label="Error Budget", grid=False)
+
+    # Label in figure
+    if (debugLevel == -1):
+        title = "$FWHM_{eff}$"
+    else:
+        if (allFWHMeff.shape[1] > 1):
+            title = "Last 2 $FWHM_{eff}$: %5.3f, %5.3f arcsec" % (allFWHMeff[-1, -2], allFWHMeff[-1, -1])
+        else:
+            title = "Last $FWHM_{eff}$: %5.3f arcsec" % (allFWHMeff[-1, -1])
+
+    __subsystemFigure(axFWHMeff, xlabel="iteration", ylabel="arcsec", title=title)
 
     # 8: dm5
 
+    # Plot the data
+    for ii in range(nField):
+        __subsystemFigure(axDm5, index=xticks, data=allDm5[ii, :], marker="b.-")
+    __subsystemFigure(axDm5, index=xticks, data=allDm5[-1, :], marker="r.-", label="GQ($\Delta$m5)")
+
+    # Label in figure
+    if (allDm5.shape[1] > 1):
+        title = "Last 2 $\Delta$m5: %5.3f, %5.3f" % (allDm5[-1, -2], allDm5[-1, -1])
+    else:
+        title = "Last $\Delta$m5: %5.3f" % (allDm5[-1, -1])
+
+    __subsystemFigure(axDm5, xlabel="iteration", title=title)
+
     # 9: elli
 
-    __subsystemFigure(axFWHMeff, index=xticks, xlabel="iteration", ylabel="arcsec", title="FWHM")
-    __subsystemFigure(axDm5, index=xticks, xlabel="iteration", title="Dm5")
-    __subsystemFigure(axElli, index=xticks, xlabel="iteration", ylabel="percent", title="Elli")
+    # Plot the data
+    if (debugLevel >= 0):
+        for ii in range(nField):
+            __subsystemFigure(axElli, index=xticks, data=allElli[ii, :]*100, marker="b.-")
+    __subsystemFigure(axElli, index=xticks, data=allElli[-1, :]*100, marker="r.-", 
+                      label="GQ (ellipticity)")
+
+    # Plot the error budget in percent
+    if (eBudget is not None):
+        __subsystemFigure(axElli, index=xticks, data=100*eBudget*np.ones(len(xticks)), 
+                          marker="k-", label="SRD Spec (Median)", grid=False)
+    
+    # Label in figure
+    if (debugLevel == -1):
+        title = "Ellipticity"
+    else:
+        if (allElli.shape[1] > 1):
+            title = "Last 2 e: %4.2f%%, %4.2f%%" % (allElli[-1, -2]*100, allElli[-1, -1]*100)
+        else:
+            title = "Last e: %4.2f%%" % (allElli[-1, -1]*100)
+    
+    __subsystemFigure(axElli, xlabel="iteration", ylabel="percent", title=title)
 
     # Save the image or not
     __saveFig(plt, saveFilePath=saveFilePath, doWrite=doWrite)
@@ -972,36 +1062,36 @@ def showControlPanel(uk=None, yfinal=None, yresi=None, iterNum=None, saveFilePat
         termZk = int(len(yfinal)/4)
 
     # Plot the degree of freedom for each subsystem
-    __subsystemFigure(axm2rig, xticksStart=1, index=range(0,3), data=uk, marker="ro", 
-                      annotation="M2 dz, dx, dy", ylabel="$\mu$m")
-    __subsystemFigure(axm2rot, xticksStart=4, index=range(3,5), data=uk, marker="ro", 
-                      annotation="M2 rx, ry", ylabel="arcsec")
-    __subsystemFigure(axcamrig, xticksStart=6, index=range(5,8), data=uk, marker="ro", 
-                      annotation="Cam dz, dx, dy", ylabel="$\mu$m")
-    __subsystemFigure(axcamrot, xticksStart=9, index=range(8,10), data=uk, marker="ro", 
-                      annotation="Cam rx, ry", ylabel="arcsec")
-    __subsystemFigure(axm13, xticksStart=1, index=range(10,30), data=uk, marker="ro", 
-                      annotation="M1M3 bending", ylabel="$\mu$m")
-    __subsystemFigure(axm2, xticksStart=1, index=range(30,50), data=uk, marker="ro", 
-                      annotation="M2 bending", ylabel="$\mu$m")
+    __subsystemFigure(axm2rig, xticksStart=1, index=range(0, 3), data=uk, marker="ro", 
+                      title="M2 dz, dx, dy", ylabel="$\mu$m")
+    __subsystemFigure(axm2rot, xticksStart=4, index=range(3, 5), data=uk, marker="ro", 
+                      title="M2 rx, ry", ylabel="arcsec")
+    __subsystemFigure(axcamrig, xticksStart=6, index=range(5, 8), data=uk, marker="ro", 
+                      title="Cam dz, dx, dy", ylabel="$\mu$m")
+    __subsystemFigure(axcamrot, xticksStart=9, index=range(8, 10), data=uk, marker="ro", 
+                      title="Cam rx, ry", ylabel="arcsec")
+    __subsystemFigure(axm13, xticksStart=1, index=range(10, 30), data=uk, marker="ro", 
+                      title="M1M3 bending", ylabel="$\mu$m")
+    __subsystemFigure(axm2, xticksStart=1, index=range(30, 50), data=uk, marker="ro", 
+                      title="M2 bending", ylabel="$\mu$m")
 
     # Plot the wavefront error
     subPlotList = [axz1, axz2, axz3, axz4]
-    annotationList = ["Zernikes R44", "Zernikes R40", "Zernikes R00", "Zernikes R04"]
+    titleList = ["Zernikes R44", "Zernikes R40", "Zernikes R00", "Zernikes R04"]
 
     # Plot the final wavefront error in the basis of Zk
     if ((yfinal is not None) and (termZk is not None)):
         label = None
         if (iterNum is not None):
             label = "iter %d" % (iterNum-1)
-        __wavefrontFigure(subPlotList, annotationList, yfinal, termZk, marker="*b-", 
+        __wavefrontFigure(subPlotList, titleList, yfinal, termZk, marker="*b-", 
                           xticksStart=4, label=label)
 
     # Plot the residue of wavefront error if full correction of wavefront error is applied
     # This is for the performance prediction only
     if ((yresi is not None) and (termZk is not None)):
         label = "if full correction applied"
-        __wavefrontFigure(subPlotList, annotationList, yresi, termZk, marker="*r-", 
+        __wavefrontFigure(subPlotList, titleList, yresi, termZk, marker="*r-", 
                           xticksStart=4, label=label)
 
     # Save the image or not
@@ -1035,7 +1125,7 @@ def __saveFig(plotFig, saveFilePath=None, doWrite=True):
         # Show the figure only
         plotFig.show()
 
-def __wavefrontFigure(subPlotList, annotationList, wavefront, termZk, marker="b", 
+def __wavefrontFigure(subPlotList, titleList, wavefront, termZk, marker="b", 
                       xticksStart=None, label=None):
     """
     
@@ -1043,7 +1133,7 @@ def __wavefrontFigure(subPlotList, annotationList, wavefront, termZk, marker="b"
     
     Arguments:
         subPlotList {[list]} -- The list of subplots of WFS.
-        annotationList {[list]} -- The annotation list of WFS. The idea is to use the name of WFS.
+        titleList {[list]} -- The title list of WFS. The idea is to use the name of WFS.
         wavefront {[ndarray]} -- Wavefront error in the basis of annular Zk.
         termZk {[int]} -- Number of terms of annular Zk.
     
@@ -1056,16 +1146,16 @@ def __wavefrontFigure(subPlotList, annotationList, wavefront, termZk, marker="b"
         RuntimeError -- The lengths of subPlotList and nameList do not match.
     """
 
-    if (len(subPlotList) != len(annotationList)):
-        raise RuntimeError("The lengths of subPlotList and nameList do not match.")
+    if (len(subPlotList) != len(titleList)):
+        raise RuntimeError("The lengths of subPlotList and titleList do not match.")
 
     for ii in range(len(subPlotList)):
         __subsystemFigure(subPlotList[ii], xticksStart=xticksStart, 
                           index=range(ii*int(termZk), (ii+1)*int(termZk)), data=wavefront, 
-                          annotation=annotationList[ii], ylabel="um", marker=marker, label=label)
+                          title=titleList[ii], ylabel="um", marker=marker, label=label)
 
 def __subsystemFigure(subPlot, xticksStart=None, index=None, data=None, marker="b", 
-                      annotation=None, xlabel=None, ylabel=None, label=None, title=None, 
+                      xlabel=None, ylabel=None, label=None, title=None, 
                       logPlot=False, grid=True):
     """
     
@@ -1080,7 +1170,6 @@ def __subsystemFigure(subPlot, xticksStart=None, index=None, data=None, marker="
         index {[list]} -- Index of values needed in the data. (default: {None})
         data {[list]} -- Data to show. (default: {None})
         marker {str} -- Marker of plot. (default: {"b"})
-        annotation {[str]} -- Annotation put in figure. (default: {None})
         xlabel {[str]} -- Label in x-axis. (default: {None})
         ylabel {[str]} -- Label in y-axis. (default: {None})
         label {[str]} -- Label of plot. (default: {None})
@@ -1118,10 +1207,6 @@ def __subsystemFigure(subPlot, xticksStart=None, index=None, data=None, marker="
     if (ylabel is not None):
         subPlot.set_ylabel(ylabel)
 
-    # Set the annotation
-    if (annotation is not None):
-        subPlot.annotate(annotation, xy=(0.3, 0.4), xycoords="axes fraction", fontsize=16)
-
     # Set the legend
     if (label is not None):
         subPlot.legend(loc="best", shadow=False, fancybox=True)
@@ -1136,22 +1221,25 @@ def __subsystemFigure(subPlot, xticksStart=None, index=None, data=None, marker="
 
 if __name__ == "__main__":
 
-    # uk = np.arange(50)
-    # yfinal = np.arange(19*4)
-    # iterNum = 5
-    # yresi = np.arange(19*4)*3
+    uk = np.arange(50)
+    yfinal = np.arange(19*4)
+    iterNum = 5
+    yresi = np.arange(19*4)*3
 
     # Initiate the mirror actuator force
-    M1M3dir = "../data/M1M3"
-    M1M3 = aosM1M3(M1M3dir)
+    # M1M3dir = "../data/M1M3"
+    # M1M3 = aosM1M3(M1M3dir)
 
-    M2dir = "../data/M2"
-    M2 = aosM2(M2dir)
+    # M2dir = "../data/M2"
+    # M2 = aosM2(M2dir)
 
-    dofRange = np.arange(0,51)*1e3
+    # dofRange = np.arange(0,51)*1e3
 
-    dataDir = "/Users/Wolf/Documents/aosOutput"
-    saveFilePath = "/Users/Wolf/Desktop/temp.png"
-    showSummaryPlots(dataDir, dofRange=dofRange, iSim=6, startIter=0, endIter=5, 
-                     M1M3ActForce=M1M3.force, M2ActForce=M2.force, 
-                     saveFilePath=saveFilePath, doWrite=True)
+    # dataDir = "/Users/Wolf/Documents/aosOutput"
+    # saveFilePath = "/Users/Wolf/Desktop/temp.png"
+    # showSummaryPlots(dataDir, dofRange=dofRange, iSim=6, startIter=0, endIter=5, 
+    #                  M1M3ActForce=M1M3.force, M2ActForce=M2.force, eBudget=0.04, 
+    #                  saveFilePath=saveFilePath, doWrite=True, debugLevel=3)
+
+    saveFilePath1 = "/Users/Wolf/Desktop/temp1.png"
+    showControlPanel(uk=uk, yfinal=yfinal, yresi=yresi, iterNum=iterNum, saveFilePath=saveFilePath1, doWrite=True)
