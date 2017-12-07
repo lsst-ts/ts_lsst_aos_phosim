@@ -58,7 +58,7 @@ class aosM1M3(object):
             M1M3dir {[str]} -- Directory to M1M3 data.
 
         Keyword Arguments:
-            debugLevel {int} -- Debug level. The higher value gives more information.
+            debugLevel {[int]} -- Debug level. The higher value gives more information.
                                 (default: {0})
         """
 
@@ -295,8 +295,8 @@ def plot3dInSurface(x, y, z, nPoint=201, title=""):
         z {[float]} -- Input z data in array.
 
     Keyword Arguments:
-        nPoint {number} -- Number of point in single axis. (default: {201})
-        title {str} -- Title of figure. (default: {""})
+        nPoint {[int]} -- Number of point in single axis. (default: {201})
+        title {[str]} -- Title of figure. (default: {""})
     """
 
     # Generate the 3D map model by radial basis function (Rbf)
@@ -312,7 +312,7 @@ def plot3dInSurface(x, y, z, nPoint=201, title=""):
 
     # Plot the image
     plt.figure()
-    plt.imshow(data, extent = [np.min(newX), np.max(newX), np.min(newY), np.max(newY)],
+    plt.imshow(data, extent=[np.min(newX), np.max(newX), np.min(newY), np.max(newY)],
                origin="lower")
     plt.xlabel("x")
     plt.ylabel("y")

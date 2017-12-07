@@ -27,7 +27,7 @@ class aosEstimator(object):
         Keyword Arguments:
             icomp {[int]} -- Index of available DOF to use defined in *.esti. (default: {None})
             izn3 {[int]} -- Index of available Zk (>Z3) to use defined in *.esti. (default: {None})
-            debugLevel {int} -- Debug level. The higher value gives more information.
+            debugLevel {[int]} -- Debug level. The higher value gives more information.
                                 (default: {0})
         """
 
@@ -496,7 +496,7 @@ def pinv_truncate(A, n=0):
         A {[ndarray]} -- Matrix to do the pseudo-inverse.
     
     Keyword Arguments:
-        n {int} -- Number of terms to do the truncation in sigma values. (default: {0})
+        n {[int]} -- Number of terms to do the truncation in sigma values. (default: {0})
     
     Returns:
         [ndarray] -- Pseudo-inversed matrix.

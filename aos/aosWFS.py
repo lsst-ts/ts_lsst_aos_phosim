@@ -48,7 +48,7 @@ class aosWFS(object):
             aosDataDir {[str]} -- AOS data directory.
 
         Keyword Arguments:
-            debugLevel {int} -- Debug level. The higher value gives more information.
+            debugLevel {[int]} -- Debug level. The higher value gives more information.
                                 (default: {0})
         """
 
@@ -155,8 +155,8 @@ class aosWFS(object):
             metr {[aosMetric]} -- Metrology of telescope.
         
         Keyword Arguments:
-            debugLevel {int} -- Debug level. The higher value gives more information.
-                                (default: {0})
+            debugLevel {[int]} -- Debug level. The higher value gives more information.
+                                  (default: {0})
         """
 
         # This function should be modified to use the WEP package for general use.
@@ -410,8 +410,8 @@ class aosWFS(object):
             numproc {[int]} -- Numebr of processors.
         
         Keyword Arguments:
-            writeToFile {bool} -- Write the calculated result into the file or not. 
-                                  (default: {True})
+            writeToFile {[bool]} -- Write the calculated result into the file or not. 
+                                    (default: {True})
         """
 
         # Do the parallel calculation
@@ -466,10 +466,10 @@ class aosWFS(object):
             metr {[aosMetric]} -- Metrology of telescope.
         
         Keyword Arguments:
-            debugLevel {int} -- Debug level. The higher value gives more information.
-                                (default: {0})
-            writeToFile {bool} -- Write the calculated result into the file or not. 
-                                  (default: {True})
+            debugLevel {[int]} -- Debug level. The higher value gives more information.
+                                  (default: {0})
+            writeToFile {[bool]} -- Write the calculated result into the file or not. 
+                                    (default: {True})
         """
 
         # Read the calculated Zk file, the unit of Zk is um

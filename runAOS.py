@@ -12,13 +12,11 @@ from datetime import datetime
 
 from aos.aosWFS import aosWFS
 from aos.aosEstimator import aosEstimator
-from aos.aosController import aosController
+from aos.aosController import aosController, showControlPanel, showSummaryPlots
 from aos.aosMetric import aosMetric
 from aos.aosM1M3 import aosM1M3
 from aos.aosM2 import aosM2
 from aos.aosTeleState import aosTeleState
-
-from aos.aosController import showControlPanel
 
 def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="offAxis"):
     """
@@ -32,9 +30,9 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
         aosDataDir {[str]} -- AOS data directory.
 
     Keyword Arguments:
-        algoFile {str} -- Algorithm to solve the transport of intensity equation (TIE).
+        algoFile {[str]} -- Algorithm to solve the transport of intensity equation (TIE).
                           (default: {"exp"})
-        cwfsModel {str} -- Optical model. (default: {"offAxis"})
+        cwfsModel {[str]} -- Optical model. (default: {"offAxis"})
     """
 
     # Instantiate the parser for command line to use
@@ -200,7 +198,12 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
     sumFigPath = os.path.join(pertDir, sumFigName)
 
     # Draw the summary plot
-    ctrl.drawSummaryPlots(state, metr, esti, M1M3, M2, args.startiter, args.enditer, args.debugLevel)
+    showSummaryPlots(dataDir=outputDir, dofRange=ctrl.range, iSim=args.iSim, ndofA=esti.ndofA, 
+                     nField=metr.nField, startIter=args.startiter, endIter=args.enditer, 
+                     nB13Max=esti.nB13Max, nB2Max=esti.nB2Max, rhoM13=ctrl.rhoM13, M1M3ActForce=M1M3.force, 
+                     rhoM2=ctrl.rhoM2, M2ActForce=M2.force, wavelength=effwave, iqBudget=state.iqBudget, 
+                     eBudget=state.eBudget, dpi=500, saveFilePath=sumFigPath, doWrite=True, 
+                     debugLevel=args.debugLevel)
 
     # Show the finish of iteration
     print("Done the runnng iterations: %d to %d." % (args.startiter, args.enditer))
