@@ -5,11 +5,10 @@
 
 import os, re
 from glob import glob
-
 import numpy as np
-from aos.aosTeleState import aosTeleState
 
-from aos.aosMetric import getInstName
+from aos.aosTeleState import aosTeleState
+from aos.aosUtility import getInstName, pinv_truncate
 
 class aosEstimator(object):
 
@@ -485,47 +484,6 @@ class aosEstimator(object):
         yresi += np.reshape(self.Ause.dot(-self.xhat[self.dofIdx]), (-1, 1))
 
         return yfinal, yresi
-
-def pinv_truncate(A, n=0):
-    """
-    
-    Get the pseudo-inversed matrix based on the singular value decomposition (SVD) 
-    with intended truncation.
-    
-    Arguments:
-        A {[ndarray]} -- Matrix to do the pseudo-inverse.
-    
-    Keyword Arguments:
-        n {[int]} -- Number of terms to do the truncation in sigma values. (default: {0})
-    
-    Returns:
-        [ndarray] -- Pseudo-inversed matrix.
-    """
-
-    # Do the singular value decomposition (A = U * S * V.T)
-    Ua, Sa, VaT = np.linalg.svd(A)
-
-    # Get the inverse of sigma
-    siginv = 1/Sa
-    
-    # Do the truncation. The output of Sa is in the decending order. 
-    # If there is the near-degenearcy in input matrix, that means the sigma value is closing to zero. 
-    # And the inverse of it is closing to infinity.
-    # Put such kind of value as 0 to do the truncation.
-    # Ref: https://egret.psychol.cam.ac.uk/statistics/local_copies_of_sources_Cardinal_and_Aitken_ANOVA/svd.htm
-    if (n > 1):
-        siginv[-n:] = 0
-
-    # Construct the inversed sigma matrix by the diagonalization matrix 
-    Sainv = np.diag(siginv)
-
-    # Construct the inversed sigma to the correct dimensions.
-    Sainv = np.concatenate((Sainv, np.zeros((VaT.shape[0], Ua.shape[0] - Sainv.shape[1]))), axis=1)
-   
-    # A^(-1) = V * S^(-1) * U.T
-    Ainv = VaT.T.dot(Sainv).dot(Ua.T)
-   
-    return Ainv
 
 if __name__ == "__main__":
 

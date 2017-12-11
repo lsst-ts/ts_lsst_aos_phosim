@@ -16,7 +16,7 @@ from lsst.cwfs.algorithm import Algorithm
 from lsst.cwfs.instrument import Instrument
 from lsst.cwfs.image import Image, readFile
 
-from aos.aosMetric import getInstName
+from aos.aosUtility import getInstName
 
 import matplotlib.pylab as plt
 
@@ -106,6 +106,8 @@ class aosWFS(object):
 
         # Directory of intrinsic Zn file belong to the specific instrument
         intrinsicZnFileName = "intrinsic_zn_%s.txt" % band.upper()
+
+        # Monochromatic condition in referenced wavelength
         if (wavelength == 0.5):
             intrinsicZnFileName = "intrinsic_zn.txt"
 

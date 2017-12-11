@@ -12,147 +12,100 @@ import multiprocessing
 
 import numpy as np
 from astropy.io import fits
-from astropy.time import Time
-from astropy.time import TimeDelta
+from astropy.time import Time, TimeDelta
 import aos.aosCoTransform as ct
 from scipy.interpolate import Rbf
 
-from lsst.cwfs.tools import ZernikeAnnularFit
-from lsst.cwfs.tools import ZernikeFit
-from lsst.cwfs.tools import ZernikeEval
-from lsst.cwfs.tools import extractArray
+from lsst.cwfs.tools import ZernikeAnnularFit, ZernikeFit, ZernikeEval, extractArray
+
+from aos.aosUtility import getInstName, isNumber
 
 import matplotlib.pyplot as plt
 
-phosimFilterID = {'u': 0, 'g': 1, 'r': 2, 'i': 3, 'z': 4, 'y': 5}
-
+# Active filter ID in PhoSim
+phosimFilterID = {"u": 0, "g": 1, "r": 2, "i": 3, "z": 4, "y": 5}
 
 class aosTeleState(object):
 
-    effwave = {'u': 0.365, 'g': 0.480, 'r': 0.622,
-               'i': 0.754, 'z': 0.868, 'y': 0.973}
-    # Gaussain quadrature wavelength
-    GQwave = {'u': [0.365], # place holder
-              'g': [0.41826, 0.44901, 0.49371, 0.53752],
-              'r': [0.55894, 0.59157, 0.63726, 0.68020],
-              'i': [0.70381, 0.73926, 0.78798, 0.83279],
-              'z': [0.868], # place holder
-              'y': [0.973]} # place holder
-    GQwt = {'u': [1],
-            'g': [0.14436, 0.27745, 0.33694, 0.24125],
-            'r': [0.15337, 0.28587, 0.33241, 0.22835],
-            'i': [0.15810, 0.29002, 0.32987, 0.22201],
-            'z': [1],
-            'y': [1]}
+    # Instrument name
+    LSST = "lsst"
+
+    # Effective wavelength
+    effwave = {"u": 0.365, "g": 0.480, "r": 0.622,
+               "i": 0.754, "z": 0.868, "y": 0.973}
+    
+    # Gaussain quadrature (GQ) points xi
+    # Check the condition of "u", "z", and "y" with Bo. What is the meaning of place holder?
+    # Does that mean the analysis is not done yet? Or is the first order approximation good enough? 
+    # The same question of weighting ratio of GQ for Bo.
+    GQwave = {"u": [0.365], # place holder
+              "g": [0.41826, 0.44901, 0.49371, 0.53752],
+              "r": [0.55894, 0.59157, 0.63726, 0.68020],
+              "i": [0.70381, 0.73926, 0.78798, 0.83279],
+              "z": [0.868], # place holder
+              "y": [0.973]} # place holder
+
+    # Gaussian quadrature (GQ) weighting ratio
+    # Check with Bo for "u", "z", and "y"
+    GQwt = {"u": [1],
+            "g": [0.14436, 0.27745, 0.33694, 0.24125],
+            "r": [0.15337, 0.28587, 0.33241, 0.22835],
+            "i": [0.15810, 0.29002, 0.32987, 0.22201],
+            "z": [1],
+            "y": [1]}
         
-    def __init__(self, inst, instruFile, iSim, ndofA, phosimDir,
+    def __init__(self, simuParamDataDir, inst, instruFile, iSim, ndofA, phosimDir,
                  pertDir, imageDir, band, wavelength,
                  endIter, debugLevel,
                  M1M3=None, M2=None):
 
+        # Type of active filter. It is noted that if the monochromatic wavelength (0.5 um)
+        # is used, the band is "g".
         self.band = band
+
+        # Monochromatic wavelength. The referenced wavelength is 0.5 um. If the value is 0, the 
+        # effective wavelength in each band is used.
         self.wavelength = wavelength
-        if wavelength == 0:
-            self.effwave = aosTeleState.effwave[band]
-            self.nOPDw = len(aosTeleState.GQwave[band])
-        else:
-            self.effwave = wavelength
-            self.nOPDw = 1
-        
-        assert sum(aosTeleState.GQwt[self.band])-1 < 1e-3
-        
+
+        # Get the effective wavelength and number of OPD
+        self.effwave, self.nOPDw = getTelEffWave(wavelength, band)
+
         # plan to write these to txt files. no columns for iter
         self.stateV = np.zeros(ndofA)  # *np.nan # telescope state(?)
 
-        aa = inst
-        if aa[-2:].isdigit():
-            aa = aa[:-2]
-        self.inst = aa
-        self.instruFile = os.path.join('data/', (instruFile + '.inst'))
-        fid = open(self.instruFile)
-        iscomment = False
-        for line in fid:
-            line = line.strip()
-            if (line.startswith('###')):
-                iscomment = ~iscomment
-            if (not(line.startswith('#')) and
-                    (not iscomment) and len(line) > 0):
-                if (line.startswith('dof')):
-                    self.stateV[int(line.split()[1]) -
-                                1] = float(line.split()[2])
-                    # by default we want micron and arcsec for everything
-                    if line.split()[3] == 'mm':
-                        self.stateV[int(line.split()[1]) - 1] *= 1e3
-                    elif line.split()[3] == 'deg':
-                        self.stateV[int(line.split()[1]) - 1] *= 3600
-                elif (line.startswith('mjd')):
-                    self.time0 = Time(float(line.split()[1]), format='mjd')
-                elif (line.startswith('iqBudget')):
-                    # read in in mas, convert to arcsec
-                    self.iqBudget = np.sqrt(
-                        np.sum([float(x)**2 for x in line.split()[1:]]))
-                elif (line.startswith('eBudget')):
-                    self.eBudget = float(line.split()[1])
-                elif (line.startswith('zenithAngle')):
-                    aa = line.split()[1]
-                    if aa.replace(".", "", 1).isdigit():
-                        # when startIter>0, we still need to set M1M3.printthz_iter0 correctly
-                        nIter = endIter + 1
-                        self.zAngle =  np.ones(nIter)*float(aa)/ 180 * np.pi
-                    else:
-                        # zAngle is extracted from OpSim ObsHistory.
-                        # This is
-                        # 90-block['altitude'].values[:100]/np.pi*180
-                        aa = os.path.join('data/', (aa + '.txt'))
-                        bb = np.loadtxt(aa).reshape((-1, 1))
-                        assert bb.shape[0]>endIter
-                        assert np.max(bb)<90
-                        assert np.min(bb)>0
-                        self.zAngle = bb[:endIter+1, 0]/ 180 * np.pi
-                elif (line.startswith('camTB') and self.inst[:4] == 'lsst'):
-                    #ignore this if it is comcam
-                    self.camTB = float(line.split()[1])
-                    self.iqBudget = np.sqrt(self.iqBudget**2
-                                              + float(line.split()[3])**2)
-                elif (line.startswith('camRotation') and self.inst[:4] == 'lsst'):
-                    #ignore this if it is comcam
-                    self.camRot = float(line.split()[1])
-                    self.iqBudget = np.sqrt(self.iqBudget**2
-                                              + float(line.split()[3])**2)
-                elif (line.startswith('M1M3ForceError')):
-                    self.M1M3ForceError = float(line.split()[1])
-                elif (line.startswith('M1M3TxGrad')):
-                    self.M1M3TxGrad = float(line.split()[1])
-                elif (line.startswith('M1M3TyGrad')):
-                    self.M1M3TyGrad = float(line.split()[1])
-                elif (line.startswith('M1M3TzGrad')):
-                    self.M1M3TzGrad = float(line.split()[1])
-                elif (line.startswith('M1M3TrGrad')):
-                    self.M1M3TrGrad = float(line.split()[1])
-                elif (line.startswith('M1M3TBulk')):
-                    self.M1M3TBulk = float(line.split()[1])
-                elif (line.startswith('M2TzGrad')):
-                    self.M2TzGrad = float(line.split()[1])
-                elif (line.startswith('M2TrGrad')):
-                    self.M2TrGrad = float(line.split()[1])
-                elif (line.startswith('znPert')):
-                    self.znPert = int(line.split()[1])
-                elif (line.startswith('surfaceGridN')):
-                    self.surfaceGridN = int(line.split()[1])
-                elif (line.startswith('opd_size')):
-                    self.opdSize = int(line.split()[1])
-                    if self.opdSize % 2 == 0:
-                        self.opdSize -= 1
-                elif (line.startswith('eimage')):
-                    self.eimage = bool(int(line.split()[1]))
-                elif (line.startswith('psf_mag')):
-                    self.psfMag = int(line.split()[1])
-                elif (line.startswith('cwfs_mag')):
-                    self.cwfsMag = int(line.split()[1])
-                elif (line.startswith('cwfs_stamp_size')):
-                    self.cwfsStampSize = int(line.split()[1])
+        # Get the instrument name        
+        self.inst = getInstName(inst)[0]
 
-        fid.close()
+        # Path to the simulation parameter data
+        self.instruFile = os.path.join(simuParamDataDir, (instruFile + ".inst"))
+
+        # Parameters of telescope state
+        self.time0 = None
+        self.iqBudget = None
+        self.eBudget = None
+        self.zAngle = None
+        self.camTB = None
+        self.camRot = None
+        self.M1M3ForceError = None
+        self.M1M3TxGrad = None
+        self.M1M3TyGrad = None
+        self.M1M3TzGrad = None
+        self.M1M3TrGrad = None
+        self.M1M3TBulk = None
+        self.M2TzGrad = None
+        self.M2TrGrad = None
+        self.znPert = None
+        self.surfaceGridN = None
+        self.opdSize = None
+        self.eimage = None
+        self.psfMag = None
+        self.cwfsMag = None
+        self.cwfsStampSize = None
+
+        # Read the file to get the parameters
+        self.__readFile(self.instruFile, endIter, opSimHisDir=simuParamDataDir)
+
+
         
         self.iqBudget = self.iqBudget * 1e-3
         self.fno = 1.2335
@@ -247,6 +200,173 @@ class aosTeleState(object):
             pre_camR = 0
             pre_temp_camR = 0
             self.getCamDistortionAll(self.zAngle[0], pre_elev, pre_camR, pre_temp_camR)
+
+    def __readFile(self, filePath, endIter, opSimHisDir=None):
+        """
+        
+        Read the AOS telescope simulation parameter file.
+        
+        Arguments:
+            filePath {[str]} -- Path to telescope simulation paramter file (*.inst).
+            endIter {[int]} -- End number of iteration.
+        
+        Keyword Arguments:
+            opSimHisDir {[str]} -- Directory of OpSim observation history data. (default: {None})
+        """
+
+        # Parameters used in reading the file
+        iscomment = False
+
+        # Read the file
+        fid = open(filePath)
+        for line in fid:
+
+            # Strip the line
+            line = line.strip()
+
+            # Ignore the comment part
+            if (line.startswith("###")):
+                iscomment = ~iscomment
+
+            if (not(line.startswith("#")) and (not iscomment) and len(line) > 0):
+
+                # Used for the single degree of freedom (DOF) unit testing
+                # Check with Bo the reason to have this 
+                if (line.startswith("dof")):
+
+                    # Get the values
+                    index, newValue, unit = line.split()[1:4]
+
+                    # There is the "-1" here for the index. The index in python array begins from 0.
+                    index -= 1
+
+                    # Assign the value
+                    self.stateV[index] = newValue
+                    
+                    # By default, use micron and arcsec as units
+                    if (unit == "mm"):
+                        self.stateV[index] *= 1e3
+                    
+                    elif (unit == "deg"):
+                        self.stateV[index] *= 3600
+                
+                # Camera mjd
+                elif (line.startswith("mjd")):
+                    self.time0 = Time(float(line.split()[1]), format="mjd")
+                
+                # Budget of image quality
+                # Check with Bo how to define this
+                elif (line.startswith("iqBudget")):
+                    # Read in mas, convert to arcsec (Check with Bo the meaning of "mas" here)
+                    self.iqBudget = np.sqrt(np.sum(np.array(line.split()[1:], dtype=float)**2))
+                
+                # Budget of ellipticity
+                # Check with Bo how to define this
+                elif (line.startswith("eBudget")):
+                    self.eBudget = float(line.split()[1])
+                
+                # Get the zenith angle
+                elif (line.startswith("zenithAngle")):
+
+                    zenithAngle = line.split()[1]
+                    
+                    # Check the value is a number or not
+                    if isNumber(zenithAngle):
+                        # Change the unit from the degree to radian
+                        # When startIter>0, we still need to set M1M3.printthz_iter0 correctly
+                        self.zAngle =  np.ones(endIter+1)*float(zenithAngle)/180*np.pi
+                    
+                    else:
+                        # zAngle is extracted from OpSim ObsHistory.
+                        # This is
+                        # 90-block['altitude'].values[:100]/np.pi*180
+                        zenithAngleFile = os.path.join(opSimHisDir, (zenithAngle + ".txt"))
+                        obsData = np.loadtxt(zenithAngleFile).reshape((-1, 1))
+                        
+                        # Make sure the data format is correct. Raise the error message if it is not.
+                        assert obsData.shape[0]>endIter, "OpSim data array length < iteration number"
+                        assert np.max(obsData)<90, "Maximum of zenith angle >= 90 degree"
+                        assert np.min(obsData)>0, "Minimum of zenith angle <= 0 degree"
+
+                        # Change the unit from the degree to radian
+                        self.zAngle = obsData[:endIter+1, 0]/180*np.pi
+                
+                # Camera temperature boundary
+                # Ignore this if the instrument is comcam (Check with Bo for this ignorance)
+                elif (line.startswith("camTB") and self.inst == self.LSST):
+                    self.camTB = float(line.split()[1])
+
+                    # Check with Bo how to get this compenstation of iqBudget
+                    self.iqBudget = np.sqrt(self.iqBudget**2 + float(line.split()[3])**2)
+
+                # Camera rotation angle
+                # Ignore this if the instrument is comcam (Check with Bo for this ignorance)                
+                elif (line.startswith("camRotation") and self.inst == self.LSST):
+                    self.camRot = float(line.split()[1])
+
+                    # Check with Bo how to get this compenstation of iqBudget
+                    self.iqBudget = np.sqrt(self.iqBudget**2 + float(line.split()[3])**2)
+                
+                # Check with Bo for the unit of this
+                elif (line.startswith("M1M3ForceError")):
+                    self.M1M3ForceError = float(line.split()[1])
+                
+                # Check with Bo how to get these temperature related parameters
+                elif (line.startswith("M1M3TxGrad")):
+                    self.M1M3TxGrad = float(line.split()[1])
+                
+                elif (line.startswith("M1M3TyGrad")):
+                    self.M1M3TyGrad = float(line.split()[1])
+                
+                elif (line.startswith("M1M3TzGrad")):
+                    self.M1M3TzGrad = float(line.split()[1])
+                
+                elif (line.startswith("M1M3TrGrad")):
+                    self.M1M3TrGrad = float(line.split()[1])
+                
+                elif (line.startswith("M1M3TBulk")):
+                    self.M1M3TBulk = float(line.split()[1])
+                
+                elif (line.startswith("M2TzGrad")):
+                    self.M2TzGrad = float(line.split()[1])
+                
+                elif (line.startswith("M2TrGrad")):
+                    self.M2TrGrad = float(line.split()[1])
+                
+                # Maximum number of Zn to define the surface in perturbation file 
+                # Check with Bo for this
+                elif (line.startswith("znPert")):
+                    self.znPert = int(line.split()[1])
+                
+                # Check with Bo for the meaning of this 
+                elif (line.startswith("surfaceGridN")):
+                    self.surfaceGridN = int(line.split()[1])
+                
+                # Size of OPD image (n x n matrix)
+                elif (line.startswith("opd_size")):
+                    self.opdSize = int(line.split()[1])
+
+                    # Make sure the value is odd
+                    if (self.opdSize % 2 == 0):
+                        self.opdSize -= 1
+                
+                # Use 0 for eimage only, without backgrounds
+                elif (line.startswith("eimage")):
+                    self.eimage = bool(int(line.split()[1]))
+                
+                # Magnitude of point spread function (PSF) star
+                elif (line.startswith("psf_mag")):
+                    self.psfMag = int(line.split()[1])
+                
+                # Magnitude of wavefront sensing star
+                elif (line.startswith("cwfs_mag")):
+                    self.cwfsMag = int(line.split()[1])
+                
+                # Wavefront sensing image stamp size
+                elif (line.startswith("cwfs_stamp_size")):
+                    self.cwfsStampSize = int(line.split()[1])
+
+        fid.close()
 
     def getCamDistortionAll(self, zAngle, pre_elev, pre_camR, pre_temp_camR):
         self.getCamDistortion(zAngle, 'L1RB', pre_elev, pre_camR, pre_temp_camR)
@@ -1231,4 +1351,34 @@ def gridSamp(xf, yf, zf, innerR, outerR, resFile, nx, ny, plots):
 
         plt.savefig(resFile.replace('.txt','.png'))
         
+def getTelEffWave(wavelength, band):
+    """
     
+    Get the effective wavelength and number of needed optical path difference (OPD).
+    
+    Arguments:
+        wavelength {[float]} -- Wavelength in um.
+        band {[str]} -- Type of active filter ("u", "g", "r", "i", "z", "y").
+    
+    Returns:
+        [float] -- Effective wavelength.
+        [int] -- Number of OPD.
+    """
+
+    # Check the type of band
+    if band not in ("u", "g", "r", "i", "z", "y"):
+        raise ValueError("No '%s' band available." % band)
+
+    # Get the effective wavelength and number of OPD
+    if (wavelength == 0):
+        effwave = aosTeleState.effwave[band]
+        nOPDw = len(aosTeleState.GQwave[band])
+    else:
+        effwave = wavelength
+        nOPDw = 1   
+
+    return effwave, nOPDw
+
+if __name__ == "__main__":
+
+    pass

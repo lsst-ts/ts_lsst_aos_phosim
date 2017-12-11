@@ -5,18 +5,19 @@
 
 # main function
 
-import os
+import os, sys
 
 from argparse import ArgumentParser
 from datetime import datetime
 
 from aos.aosWFS import aosWFS
 from aos.aosEstimator import aosEstimator
-from aos.aosController import aosController, showControlPanel, showSummaryPlots
+from aos.aosController import aosController
 from aos.aosMetric import aosMetric
 from aos.aosM1M3 import aosM1M3
 from aos.aosM2 import aosM2
-from aos.aosTeleState import aosTeleState
+from aos.aosTeleState import aosTeleState, getTelEffWave
+from aos.aosUtility import showControlPanel, showSummaryPlots
 
 def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="offAxis"):
     """
@@ -34,6 +35,8 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
                           (default: {"exp"})
         cwfsModel {[str]} -- Optical model. (default: {"offAxis"})
     """
+
+    # global state
 
     # Instantiate the parser for command line to use
     parser = __setParseAugs()
@@ -66,10 +69,7 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
         wavelength = 0
 
     # Get the effective wavelength
-    if (wavelength == 0):
-        effwave = aosTeleState.effwave[band]
-    else:
-        effwave = wavelength
+    effwave = getTelEffWave(wavelength, band)[0]
 
     # *****************************************
     # simulate the perturbations
@@ -81,8 +81,6 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
 
     M2dir = os.path.join(aosDataDir, "M2")
     M2 = aosM2(M2dir, debugLevel=args.debugLevel)
-
-    # znPert = 28  # znmax used in pert file to define surfaces
 
     # *****************************************
     # run wavefront sensing algorithm
@@ -108,9 +106,11 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
                         izn3=args.izn3, debugLevel=args.debugLevel)
 
     # Instantiate the AOS telescope state
-    state = aosTeleState(args.inst, args.simuParam, args.iSim, esti.ndofA,
+    state = aosTeleState(aosDataDir, args.inst, args.simuParam, args.iSim, esti.ndofA,
                          phosimDir, pertDir, imageDir, band, wavelength,
                          args.enditer, args.debugLevel, M1M3=M1M3, M2=M2)
+
+    # sys.exit()
 
     # *****************************************
     # control algorithm
