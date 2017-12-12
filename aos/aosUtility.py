@@ -678,32 +678,47 @@ def getLUTforce(zangle, LUTfile):
     
     Returns:
         [ndarray] -- Actuator forces in specific zenith angle.
+    
+    Raises:
+        ValueError -- Incorrect LUT degree order.
     """
 
+    # Read the LUT file
     lut = np.loadtxt(LUTfile)
+
+    # Get the step. The values of LUT are listed in every step size.
+    # The degree range is 0 - 90 degree.
+    # The file in the simulation is every 1 degree. The formal one should 
+    # be every 5 degree.
     ruler = lut[0, :]
+    stepList = np.diff(ruler)
+    if np.any(stepList <= 0):
+        raise ValueError("The degee order in LUT is incorrect.")
 
-    step = ruler[1] - ruler[0]
+    # The specific zenith angle is larger than the listed angle range
+    if (zangle >= ruler.max()):
+        # Use the biggest listed zenith angle data instead
+        lutForce = lut[1:, -1]
 
-    p2 = (ruler >= zangle)
-#    print "FINE",p2, p2.shape
-    if (np.count_nonzero(p2) == 0):  # zangle is too large to be in range
-        p2 = ruler.shape[0] - 1
-        p1 = p2
-        w1 = 1
-        w2 = 0
-    elif (p2[0]):  # zangle is too small to be in range
-        p2 = 0  # this is going to be used as index
-        p1 = 0  # this is going to be used as index
-        w1 = 1
-        w2 = 0
+    # The specific zenith angle is smaller than the listed angle range
+    elif (zangle <= ruler.min()):
+        # Use the smallest listed zenith angle data instead
+        lutForce = lut[1:, 0]
+
+    # The specific zenith angle is in the listed angle range
     else:
-        p1 = p2.argmax() - 1
-        p2 = p2.argmax()
-        w1 = (ruler[p2] - zangle) / step
-        w2 = (zangle - ruler[p1]) / step
+        # Linear fit the data
+        # Find the boundary indexes for the specific zenith angle
+        p1 = np.where(ruler<=zangle)[0][-1]
+        p2 = p1+1
 
-    return np.dot(w1, lut[1:, p1]) + np.dot(w2, lut[1:, p2])
+        # Do the linear approximation
+        w2 = (zangle-ruler[p1])/stepList[p1]
+        w1 = 1-w2
+
+        lutForce = w1*lut[1:, p1] + w2*lut[1:, p2]
+
+    return lutForce
 
 if __name__ == "__main__":
 
