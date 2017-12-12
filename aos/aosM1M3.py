@@ -52,14 +52,14 @@ class aosM1M3(object):
     def __init__(self, M1M3dir, debugLevel=0):
         """
 
-        Initiate the AocM1M3 class.
+        Initiate the aosM1M3 class.
 
         Arguments:
             M1M3dir {[str]} -- Directory to M1M3 data.
 
         Keyword Arguments:
             debugLevel {[int]} -- Debug level. The higher value gives more information.
-                                (default: {0})
+                                  (default: {0})
         """
 
         # Get the bending mode information
@@ -132,6 +132,21 @@ class aosM1M3(object):
 
         # Fit the r-gradß
         self.trdz = self.__fitData(tx, ty, data[:, 6], normX, normY)
+
+        # Print plan along z axis in iteration 0
+        # This value is updated in the initialization of aosTeleState class
+        self.printthz_iter0 = None
+
+    def setPrintthz_iter0(self, printthz_iter0):
+        """
+        
+        Set the mirror print along z-axis in the iteration 0.
+        
+        Arguments:
+            printthz_iter0 {[ndarray]} -- Mirror print along z-axis in the iteration 0.
+        """
+
+        self.printthz_iter0 = printthz_iter0
 
     def __fitData(self, dataX, dataY, data, x, y):
         """

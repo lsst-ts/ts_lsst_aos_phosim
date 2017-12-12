@@ -19,7 +19,7 @@ class aosM2(object):
     def __init__(self, M2dir, debugLevel=0):
         """
         
-        Initiate the AocM2 class.
+        Initiate the aosM2 class.
         
         Arguments:
             M2dir {[str]} -- Directory to M2 data.
@@ -35,7 +35,6 @@ class aosM2(object):
         bx = data[:, 0]
         by = data[:, 1]
         bz = data[:, 2:]
-
 
         # Get the actuator force
 
@@ -65,6 +64,21 @@ class aosM2(object):
         self.hdz = data[:, 3]
         self.tzdz = data[:, 4]
         self.trdz = data[:, 5]
+
+        # Print plan along z axis in iteration 0
+        # This value is updated in the initialization of aosTeleState class
+        self.printthz_iter0 = None
+
+    def setPrintthz_iter0(self, printthz_iter0):
+        """
+        
+        Set the mirror print along z-axis in the iteration 0.
+        
+        Arguments:
+            printthz_iter0 {[ndarray]} -- Mirror print along z-axis in the iteration 0.
+        """
+
+        self.printthz_iter0 = printthz_iter0
 
     def getPrintthz(self, zAngle, pre_comp_elev=0):
         """

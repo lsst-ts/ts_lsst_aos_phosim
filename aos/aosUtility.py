@@ -667,6 +667,44 @@ def isNumber(s):
  
     return False
 
+def getLUTforce(zangle, LUTfile):
+    """
+    
+    Get the actuator force of mirror based on the look-up table (LUT).
+    
+    Arguments:
+        zangle {[float]} -- Zenith angle in degree.
+        LUTfile {[str]} -- Path to the file of LUT.
+    
+    Returns:
+        [ndarray] -- Actuator forces in specific zenith angle.
+    """
+
+    lut = np.loadtxt(LUTfile)
+    ruler = lut[0, :]
+
+    step = ruler[1] - ruler[0]
+
+    p2 = (ruler >= zangle)
+#    print "FINE",p2, p2.shape
+    if (np.count_nonzero(p2) == 0):  # zangle is too large to be in range
+        p2 = ruler.shape[0] - 1
+        p1 = p2
+        w1 = 1
+        w2 = 0
+    elif (p2[0]):  # zangle is too small to be in range
+        p2 = 0  # this is going to be used as index
+        p1 = 0  # this is going to be used as index
+        w1 = 1
+        w2 = 0
+    else:
+        p1 = p2.argmax() - 1
+        p2 = p2.argmax()
+        w1 = (ruler[p2] - zangle) / step
+        w2 = (zangle - ruler[p1]) / step
+
+    return np.dot(w1, lut[1:, p1]) + np.dot(w2, lut[1:, p2])
+
 if __name__ == "__main__":
 
     uk = np.arange(50)

@@ -18,7 +18,7 @@ from scipy.interpolate import Rbf
 
 from lsst.cwfs.tools import ZernikeAnnularFit, ZernikeFit, ZernikeEval, extractArray
 
-from aos.aosUtility import getInstName, isNumber
+from aos.aosUtility import getInstName, isNumber, getLUTforce
 
 import matplotlib.pyplot as plt
 
@@ -54,10 +54,34 @@ class aosTeleState(object):
             "z": [1],
             "y": [1]}
         
-    def __init__(self, simuParamDataDir, inst, instruFile, iSim, ndofA, phosimDir,
-                 pertDir, imageDir, band, wavelength,
-                 endIter, debugLevel,
-                 M1M3=None, M2=None):
+    def __init__(self, simuParamDataDir, inst, simuParamFileName, iSim, ndofA, phosimDir,
+                 pertDir, imageDir, band, wavelength, endIter, M1M3=None, M2=None, 
+                 opSimHisDir=None, debugLevel=0):
+        """
+        
+        Initiate the aosTeleState class.
+        
+        Arguments:
+            simuParamDataDir {[str]} -- Directory of simulation parameter files (*.inst).
+            inst {[str]} -- Instrument name (e.g. lsst or comcam10).
+            simuParamFileName {[str]} -- Simulation parameter file name.
+            iSim {[int]} -- Simulation number.
+            ndofA {[int]} -- Number of degree of freedom.
+            phosimDir {[str]} -- Directory of PhoSim.
+            pertDir {[str]} -- Directory of perturbation files.
+            imageDir {[str]} -- Directory of image files.
+            band {[str]} -- Band of active filter.
+            wavelength {[float]} -- Single chromatic light wavelength in um. If the value is 0, the 
+                                    effective wavelength in each band is used.
+            endIter {[int]} -- End iteration number.
+        
+        Keyword Arguments:
+            M1M3 {[aosM1M3]} -- aosM1M3 object. (default: {None})
+            M2 {[aosM2]} -- aosM2 object. (default: {None})
+            opSimHisDir {[str]} -- Directory of OpSim Observation history. (default: {None})
+            debugLevel {int} -- Debug level. The higher value gives more information. 
+                                (default: {0})
+        """
 
         # Type of active filter. It is noted that if the monochromatic wavelength (0.5 um)
         # is used, the band is "g".
@@ -70,14 +94,14 @@ class aosTeleState(object):
         # Get the effective wavelength and number of OPD
         self.effwave, self.nOPDw = getTelEffWave(wavelength, band)
 
-        # plan to write these to txt files. no columns for iter
-        self.stateV = np.zeros(ndofA)  # *np.nan # telescope state(?)
+        # Telescope state in the basis of degree of freedom (DOF)
+        self.stateV = np.zeros(ndofA) 
 
         # Get the instrument name        
         self.inst = getInstName(inst)[0]
 
         # Path to the simulation parameter data
-        self.instruFile = os.path.join(simuParamDataDir, (instruFile + ".inst"))
+        self.instruFile = os.path.join(simuParamDataDir, (simuParamFileName + ".inst"))
 
         # Parameters of telescope state
         self.time0 = None
@@ -102,116 +126,206 @@ class aosTeleState(object):
         self.cwfsMag = None
         self.cwfsStampSize = None
 
+        self.M1M3surf = None
+        self.M2surf = None
+
         # Read the file to get the parameters
-        self.__readFile(self.instruFile, endIter, opSimHisDir=simuParamDataDir)
+        self.__readFile(self.instruFile)
 
+        # Update zAngle for multiple iteration
+        if (self.zAngle is not None):
+            self.zAngle = self.__getZenithAngleForIteration(self.zAngle, endIter, opSimHisDir=opSimHisDir)
 
+        # Change the unit to arcsec
+        # Check with Bo for the original unit defined in GT.inst file because 
+        # I do not understand the meaning of 1e-3 here
+        if (self.iqBudget is not None):
+            self.iqBudget = self.iqBudget*1e-3
         
-        self.iqBudget = self.iqBudget * 1e-3
-        self.fno = 1.2335
-        k = self.fno * self.effwave / 0.2
-        self.psfStampSize = int(self.opdSize +
-                                np.rint((self.opdSize * (k - 1) + 1e-5) / 2) *
-                                2)
+        # Get the size of point spread function (PSF) stamp
+        # Check with Bo for the math here
+        fno = 1.2335
+        k = fno*self.effwave/0.2
+        self.psfStampSize = int(self.opdSize + np.rint((self.opdSize * (k-1) + 1e-5) / 2) * 2)
+
+        # Simulation number
         self.iSim = iSim
+
+        # Directory of PhoSim
         self.phosimDir = phosimDir
-        self.pertDir = pertDir
-        # if not os.path.isdir(pertDir):
-        #     os.makedirs(pertDir)
-        self.imageDir = imageDir
-        # if not os.path.isdir(imageDir):
-        #     os.makedirs(imageDir)
-
-        # self.setIterNo(0)
-        self.phosimActuatorID = [
-            # M2 z, x, y, rx, ry
-            5, 6, 7, 8, 9,
-            # Cam z, x, y, rx, ry
-            10, 11, 12, 13, 14] + [
-            # M13 and M2 bending
-            i for i in range(15, 15 + ndofA - 10)]
-
-        self.opdGrid1d = np.linspace(-1, 1, self.opdSize)
-        self.opdx, self.opdy = np.meshgrid(self.opdGrid1d, self.opdGrid1d)
-        # runProgram('rm -rf %s/output/*'%self.phosimDir)
-
-        if self.wavelength == 0:
-            self.sedfile = 'sed_flat.txt'
-        else:
-            self.sedfile = 'sed_%d.txt' % (self.wavelength * 1e3)
-            sedfileFull = '%s/data/sky/%s' % (self.phosimDir, self.sedfile)
-            if not os.path.isfile(sedfileFull):
-                fsed = open(sedfileFull, 'w')
-                fsed.write('%d   1.0\n' % (self.wavelength * 1e3))
-                fsed.close()
         
-        if debugLevel >= 3:
-            print('in aosTeleState:')
+        # Directory of perturbation files
+        self.pertDir = pertDir
+        
+        # Directory of image files
+        self.imageDir = imageDir
+
+        # Actuator ID in PhoSim
+        # M2 z, x, y, rx, ry (5, 6, 7, 8, 9)
+        # Cam z, x, y, rx, ry (10, 11, 12, 13, 14)
+        # M1M3 and M2 bending modes
+        # Check with Bo for the index of "nodfA" in PhoSim. It is wield if M1M3 and M2 have different 
+        # bending modes. Does M1M3 begin from 15 and M2 begin from 35 
+        phoSimStartIdx = 5
+        self.phosimActuatorID = range(phoSimStartIdx, ndofA+phoSimStartIdx)
+
+        # x-, y-coordinate in the OPD image 
+        opdGrid1d = np.linspace(-1, 1, self.opdSize)
+        self.opdx, self.opdy = np.meshgrid(opdGrid1d, opdGrid1d)
+
+        # Show the information of OPD image grid or not 
+        if (debugLevel >= 3):
+            print("in aosTeleState:")
             print(self.stateV)
-            print(self.opdGrid1d.shape)
-            print(self.opdGrid1d[0])
-            print(self.opdGrid1d[-1])
-            print(self.opdGrid1d[-2])
+            print(opdGrid1d.shape)
+            print(opdGrid1d[0])
+            print(opdGrid1d[-1])
+            print(opdGrid1d[-2])
 
-        if hasattr(self, 'zAngle'):
-            M1M3.printthz_iter0 = M1M3.getPrintthz(self.zAngle[0])
+        # Get the spectral energy distribution (SED) file name
+        self.sedfile = self.__getSedFileName(self.wavelength, phosimDir)
+        
+        # Assign the seed of random number by using the simulation number
+        np.random.seed(self.iSim)
 
-            # add 5% force error. This is for iter0 only
-            u0 = M1M3.zf * np.cos(self.zAngle[0]) + M1M3.hf * np.sin(self.zAngle[0])
-            LUTforce = getLUTforce(self.zAngle[0] / np.pi * 180, M1M3.LUTfile)
-            np.random.seed(self.iSim)
-            # if the error is a percentage error
-            myu = (1+2*(np.random.rand(M1M3.nActuator)-0.5)
-                   *self.M1M3ForceError)*LUTforce
-            # if the error is an absolute error in Newton
-            # myu = 2 * (np.random.rand(M1M3.nActuator) - 0.5) \
-            #         * self.M1M3ForceError + LUTforce
-            # balance forces along z
-            myu[M1M3.nzActuator - 1] = np.sum(LUTforce[:M1M3.nzActuator]) \
-                - np.sum(myu[:M1M3.nzActuator - 1])
-            # ; %balance forces along y
-            myu[M1M3.nActuator - 1] = np.sum(LUTforce[M1M3.nzActuator:]) \
-                - np.sum(myu[M1M3.nzActuator:-1])
+        # Get the print of M1M3 and M2 along z-axis and add the random value to mirror surfaces
+        if (self.zAngle is not None):
 
-            self.M1M3surf = (M1M3.printthz_iter0 + M1M3.G.dot(myu - u0)
-                             ) * 1e6  # now in um
+            # Get the zenith angle in iteration 0
+            zenithAngle0 = self.zAngle[0]
 
-            # M2
-            M2.printthz_iter0 = M2.getPrintthz(self.zAngle[0])
+            # Set the mirror print along z direction of M1M3 in iteration 0
+            M1M3.setPrintthz_iter0(M1M3.getPrintthz(zenithAngle0))
+
+            # Get the actuator forces of M1M3 based on the look-up table (LUT)
+            LUTforce = getLUTforce(zenithAngle0/np.pi*180, M1M3.LUTfile)
+
+            # Add 5% force error (self.M1M3ForceError). This is for iteration 0 only. 
+            # This means from -5% to +5% of original actuator's force. 
+            myu = (1 + 2*(np.random.rand(M1M3.nActuator) - 0.5)*self.M1M3ForceError)*LUTforce
+
+            # Balance forces along z-axis
+            # Not sure this part. Need to check with Bo for the arangement of LUT force
+            myu[M1M3.nzActuator-1] = np.sum(LUTforce[:M1M3.nzActuator]) - np.sum(myu[:M1M3.nzActuator-1])
+
+            # Balance forces along y-axis
+            # Not sure this part. Need to check with Bo for the arangement of LUT force
+            myu[M1M3.nActuator-1] = np.sum(LUTforce[M1M3.nzActuator:]) - np.sum(myu[M1M3.nzActuator:-1])
+
+            # Get the net force along the z-axis 
+            u0 = M1M3.zf*np.cos(zenithAngle0) + M1M3.hf*np.sin(zenithAngle0)
+
+            # Add the error to the M1M3 surface and change the unit to um
+            # It looks like there is the unit inconsistency between M1M3 and M2
+            # This inconsistency comes from getPrintthz() in mirror. But I do not understand the condition
+            # in M1M3 compared with M2.
+            # Check this with Bo.
+            self.M1M3surf = (M1M3.printthz_iter0 + M1M3.G.dot(myu - u0))*1e6
+
+            # Set the mirror print along z direction of M2 in iteration 0
+            M2.setPrintthz_iter0(M2.getPrintthz(zenithAngle0))
+
+            # This value should be copy of M2.printthz_iter0. Check this with Bo.
             self.M2surf = M2.printthz_iter0
+            # self.M2surf = M2.printthz_iter0.copy()
 
-        if hasattr(self, 'M1M3TBulk'):
+        # Do the temperature correction for mirror surface
+        # Need to check with Bo to put this in run-time change for continuing update temperature or not.
+        if ((self.M1M3TBulk is not None) and (self.M1M3surf is not None)):
 
-            self.M1M3surf += self.M1M3TBulk * M1M3.tbdz \
-              + self.M1M3TxGrad * M1M3.txdz \
-                + self.M1M3TyGrad * M1M3.tydz + self.M1M3TzGrad * M1M3.tzdz \
-                + self.M1M3TrGrad * M1M3.trdz
+            self.M1M3surf += self.M1M3TBulk*M1M3.tbdz + self.M1M3TxGrad*M1M3.txdz \
+                             + self.M1M3TyGrad*M1M3.tydz + self.M1M3TzGrad*M1M3.tzdz \
+                             + self.M1M3TrGrad*M1M3.trdz
+            self.M2surf += self.M2TzGrad*M2.tzdz + self.M2TrGrad*M2.trdz
 
-            self.M2surf += self.M2TzGrad * M2.tzdz + self.M2TrGrad * M2.trdz
+        # Do the coordinate transformation (z-axis only) from M1M3 to Zemax.
+        if (self.M1M3surf is not None):
+            self.M1M3surf = ct.M1CRS2ZCRS(0, 0, self.M1M3surf)[2]
 
-        if hasattr(self, 'M1M3surf'):
-            _, _, self.M1M3surf = ct.M1CRS2ZCRS(0, 0, self.M1M3surf)
-        if hasattr(self, 'M2surf'):
-            _, _, self.M2surf = ct.M2CRS2ZCRS(0, 0, self.M2surf)
+        # Do the coordinate transformation (z-axis only) from M2 to Zemax.
+        if (self.M2surf is not None):
+            self.M2surf = ct.M2CRS2ZCRS(0, 0, self.M2surf)[2]
 
-        if hasattr(self, 'camRot'):
+        # Get the camera distortion
+        # Check with Bo that we need to allow the run time change of this variable or not.
+        # I believe the answer should be yes.
+        if (self.camRot is not None):
+            self.getCamDistortionAll(self.zAngle[0], 0, 0, 0)
 
-            pre_elev = 0
-            pre_camR = 0
-            pre_temp_camR = 0
-            self.getCamDistortionAll(self.zAngle[0], pre_elev, pre_camR, pre_temp_camR)
+    def __getZenithAngleForIteration(self, zAngle, endIter, opSimHisDir=None):
+        """
+        
+        Get the zenith angle for iteration use.
+        
+        Arguments:
+            zAngle {[str]} -- Zenith angle setting.
+            endIter {[int]} -- End iteratioin number.
+        
+        Keyword Arguments:
+            opSimHisDir {[str]} -- Directory of OpSim Observation History. (default: {None})
+        
+        Returns:
+            [ndarray] -- Zenith angles in iteration.
+        """
+        
+        # Check the value is a number or not
+        if isNumber(zAngle):
+            # Change the unit from the degree to radian
+            # When startIter>0, we still need to set M1M3.printthz_iter0 correctly
+            zAngleIter = np.ones(endIter+1)*float(zAngle)/180*np.pi
+        
+        else:
+            # zAngle is extracted from OpSim ObsHistory.
+            # This is 90-block['altitude'].values[:100]/np.pi*180 --> Check the data format with Bo.
+            zenithAngleFile = os.path.join(opSimHisDir, (zAngle + ".txt"))
+            obsData = np.loadtxt(zenithAngleFile).reshape((-1, 1))
+            
+            # Make sure the data format is correct. Raise the error message if it is not.
+            assert obsData.shape[0]>endIter, "OpSim data array length < iteration number"
+            assert np.max(obsData)<90, "Maximum of zenith angle >= 90 degree"
+            assert np.min(obsData)>0, "Minimum of zenith angle <= 0 degree"
 
-    def __readFile(self, filePath, endIter, opSimHisDir=None):
+            # Change the unit from the degree to radian
+            zAngleIter = obsData[:endIter+1, 0]/180*np.pi
+
+        return zAngleIter
+
+    def __getSedFileName(self, wavelengthInUm, phosimDir):
+        """
+        
+        Get the spectral energy distribution (SED) file name. For the single chromatic light, the 
+        related file will be generated if it does not exist.
+        
+        Arguments:
+            wavelengthInUm {[float]} -- Wavelength in um.
+            phosimDir {[str]} -- Directory of PhoSim.
+        
+        Returns:
+            [str] -- SED file name.
+        """
+
+        if (wavelengthInUm == 0):
+            sedfileName = "sed_flat.txt"
+        else:
+            # Unit is changed to nm
+            sedfileName = "sed_%d.txt" % (wavelengthInUm*1e3)
+
+            # Create the sed file for single chromatic light if the sed file does not exist 
+            pathToSedFile = os.path.join(phosimDir, "data", "sky", sedfileName)
+            if not os.path.isfile(pathToSedFile):
+                fsed = open(pathToSedFile, "w")
+                fsed.write("%d   1.0\n" % (wavelengthInUm*1e3))
+                fsed.close()
+
+        return sedfileName
+
+    def __readFile(self, filePath):
         """
         
         Read the AOS telescope simulation parameter file.
         
         Arguments:
             filePath {[str]} -- Path to telescope simulation paramter file (*.inst).
-            endIter {[int]} -- End number of iteration.
-        
-        Keyword Arguments:
-            opSimHisDir {[str]} -- Directory of OpSim observation history data. (default: {None})
         """
 
         # Parameters used in reading the file
@@ -265,31 +379,9 @@ class aosTeleState(object):
                 elif (line.startswith("eBudget")):
                     self.eBudget = float(line.split()[1])
                 
-                # Get the zenith angle
+                # Get the zenith angle or file name
                 elif (line.startswith("zenithAngle")):
-
-                    zenithAngle = line.split()[1]
-                    
-                    # Check the value is a number or not
-                    if isNumber(zenithAngle):
-                        # Change the unit from the degree to radian
-                        # When startIter>0, we still need to set M1M3.printthz_iter0 correctly
-                        self.zAngle =  np.ones(endIter+1)*float(zenithAngle)/180*np.pi
-                    
-                    else:
-                        # zAngle is extracted from OpSim ObsHistory.
-                        # This is
-                        # 90-block['altitude'].values[:100]/np.pi*180
-                        zenithAngleFile = os.path.join(opSimHisDir, (zenithAngle + ".txt"))
-                        obsData = np.loadtxt(zenithAngleFile).reshape((-1, 1))
-                        
-                        # Make sure the data format is correct. Raise the error message if it is not.
-                        assert obsData.shape[0]>endIter, "OpSim data array length < iteration number"
-                        assert np.max(obsData)<90, "Maximum of zenith angle >= 90 degree"
-                        assert np.min(obsData)>0, "Minimum of zenith angle <= 0 degree"
-
-                        # Change the unit from the degree to radian
-                        self.zAngle = obsData[:endIter+1, 0]/180*np.pi
+                    self.zAngle = line.split()[1]
                 
                 # Camera temperature boundary
                 # Ignore this if the instrument is comcam (Check with Bo for this ignorance)
@@ -420,10 +512,13 @@ class aosTeleState(object):
                 ii, self.stateV[ii], ctrlRange[ii]))
 
         # elevation is changing, the print through maps need to change
-        if hasattr(self, 'M1M3surf'):
+        if (self.M1M3surf is not None):
+            # Check this statement with Bo. If there is the unit inconsistency in the initialization (* 1e6)
+            # there should be it here.
             self.M1M3surf += M1M3.getPrintthz(self.zAngle[self.iIter]) -\
               M1M3.printthz_iter0
-        if hasattr(self, 'M2surf'):              
+
+        if (self.M2surf is not None):
             self.M2surf += M2.getPrintthz(self.zAngle[self.iIter]) -\
               M2.printthz_iter0
 
@@ -1109,37 +1204,6 @@ def fieldAgainstRuler(ruler, field, chipPixel):
     pixel += chipPixel / 2
 
     return np.floor(p / 3), p % 3, int(pixel)
-
-
-def getLUTforce(zangle, LUTfile):
-    """
-    zangle should be in degree
-    """
-
-    lut = np.loadtxt(LUTfile)
-    ruler = lut[0, :]
-
-    step = ruler[1] - ruler[0]
-
-    p2 = (ruler >= zangle)
-#    print "FINE",p2, p2.shape
-    if (np.count_nonzero(p2) == 0):  # zangle is too large to be in range
-        p2 = ruler.shape[0] - 1
-        p1 = p2
-        w1 = 1
-        w2 = 0
-    elif (p2[0]):  # zangle is too small to be in range
-        p2 = 0  # this is going to be used as index
-        p1 = 0  # this is going to be used as index
-        w1 = 1
-        w2 = 0
-    else:
-        p1 = p2.argmax() - 1
-        p2 = p2.argmax()
-        w1 = (ruler[p2] - zangle) / step
-        w2 = (zangle - ruler[p1]) / step
-
-    return np.dot(w1, lut[1:, p1]) + np.dot(w2, lut[1:, p2])
 
 def runOPD(argList):
     OPD_inst = argList[0]
