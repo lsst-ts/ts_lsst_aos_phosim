@@ -229,6 +229,7 @@ class aosTeleState(object):
             self.M1M3surf = (M1M3.printthz_iter0 + M1M3.G.dot(myu - u0))*1e6
 
             # Set the mirror print along z direction of M2 in iteration 0
+            # When considering the update(), do we need this statement? Check with Bo.
             M2.setPrintthz_iter0(M2.getPrintthz(zenithAngle0))
 
             # This value should be copy of M2.printthz_iter0. Check this with Bo.
@@ -256,6 +257,8 @@ class aosTeleState(object):
         # Check with Bo that we need to allow the run time change of this variable or not.
         # I believe the answer should be yes.
         # This part may be removed
+        # It looks like only lsst camera will do the distortion correction. Is this true?
+        # Check this part with Bo.
         if (self.camRot is not None):
             # Check the inputs here with Bo.
             self.__getCamDistortionAll(simuParamDataDir, self.zAngle[0], 0, 0, 0)
@@ -391,7 +394,7 @@ class aosTeleState(object):
                 elif (line.startswith("zenithAngle")):
                     self.zAngle = line.split()[1]
                 
-                # Camera temperature boundary
+                # Camera temperature in degree C
                 # Ignore this if the instrument is comcam (Check with Bo for this ignorance)
                 elif (line.startswith("camTB") and self.inst == self.LSST):
                     self.camTB = float(line.split()[1])
@@ -620,8 +623,8 @@ class aosTeleState(object):
         Generate the folder if the folder does not exist.
 
         Arguments:
-            pathToFolder {[string]} -- Path to folder.
-            newFolder {[string]} -- Name of new folder.
+            pathToFolder {[str]} -- Path to folder.
+            newFolder {[str]} -- Name of new folder.
         """
 
         # Generate the path of new folder
@@ -662,6 +665,11 @@ class aosTeleState(object):
         if (self.M1M3surf is not None):
             # Check this statement with Bo. If there is the unit inconsistency in the initialization (* 1e6), 
             # there should be it here also.
+
+            # By the way, if considering the elevation angle change, the statement should be something like:
+            # if (self.iIter >= 1):
+            #     self.M1M3surf += M1M3.getPrintthz(self.zAngle[self.iIter]) - M1M3.getPrintthz(self.zAngle[self.iIter-1])
+
             self.M1M3surf += M1M3.getPrintthz(self.zAngle[self.iIter]) - M1M3.printthz_iter0
 
         if (self.M2surf is not None):
@@ -688,6 +696,18 @@ class aosTeleState(object):
             self.__getCamDistortion(simuParamDataDir, zAngle, distType, pre_elev, pre_camR, pre_temp_camR)
 
     def __getCamDistortion(self, simuParamDataDir, zAngle, distType, pre_elev, pre_camR, pre_temp_camR):
+        """
+        
+        Get the camera distortion correction.
+        
+        Arguments:
+            simuParamDataDir {[str]} -- Directory of simulation parameter files.
+            zAngle {[float]} -- Zenith angle.
+            distType {[str]} -- Distortion type.
+            pre_elev {[float]} -- ?? Check with Bo.
+            pre_camR {[float]} -- ?? Check with Bo.
+            pre_temp_camR {[float]} -- ?? Check with Bo.
+        """
 
         # Path to camera distortion parameter file
         dataFile = os.path.join(simuParamDataDir, "camera", (distType + ".txt"))
@@ -701,27 +721,46 @@ class aosTeleState(object):
                     ( data[1, 3:]*np.cos(camRotAngle) + data[2, 3:]*np.sin(camRotAngle) )*np.sin(zenithAngle)
         distortion = distFun(zAngle, self.camRot) - distFun(pre_elev, pre_camR)
 
-        # Do the temperation correction by the simple temperature interpolation/ extrapolation
-        if self.camTB < data[3, 2]:
-            distortion += data[3, 3:]
-        elif self.camTB > data[10, 2]:
-            distortion += data[10, 3:]
-        else:
-            p2 = (data[3:, 2] > self.camTB).argmax() + 3
-            p1 = p2 - 1
-            w1 = (data[p2, 2] - self.camTB) / (data[p2, 2] - data[p1, 2])
-            w2 = (self.camTB - data[p1, 2]) / (data[p2, 2] - data[p1, 2])
-            distortion += w1 * data[p1, 3:] + w2 * data[p2, 3:]
+        # Do the temperature correction by the simple temperature interpolation/ extrapolation
+        # If the temperature is too low, use the lowest listed temperature to do the correction.
+        # List of data: 
+        # [ze. angle, camRot angle, temp (C), dx (mm), dy (mm), dz (mm), Rx (rad), Ry (rad), Rz (rad)]
+        startTempRowIdx = 3
+        endTempRowIdx = 10
+        if (self.camTB <= data[startTempRowIdx, 2]):
+            distortion += data[startTempRowIdx, 3:]
 
-        distortion -= data[(data[3:, 2] == pre_temp_camR).argmax() + 3, 3:]
+        # If the temperature is too high, use the highest listed temperature to do the correction.
+        elif (self.camTB >= data[endTempRowIdx, 2]):
+            distortion += data[endTempRowIdx, 3:]
+        
+        # Get the correction value by the linear fitting
+        else:
+            
+            # Find the temperature boundary indexes
+            p2 = (data[startTempRowIdx:, 2] > self.camTB).argmax() + startTempRowIdx
+            p1 = p2-1
+            
+            # Calculate the linear weighting 
+            w1 = (data[p2, 2] - self.camTB) / (data[p2, 2] - data[p1, 2])
+            w2 = 1-w1
+            distortion += w1*data[p1, 3:] + w2*data[p2, 3:]
+
+        # Minus the reference temperature correction. There is the problem here.
+        # If the pre_temp_carR is not on the data list, this statement will fail/ get nothing.
+        distortion -= data[(data[startTempRowIdx:, 2] == pre_temp_camR).argmax() + startTempRowIdx, 3:]
        
-        # Andy's Zernike order is different, fix it
-        if distType[-3:] == 'zer':
+        # The order/ index of Zernike corrections by Andy in file is different from PhoSim use.
+        # Reorder the correction here for PhoSim to use.
+        if (distType[-3:] == "zer"):
             zidx = [1, 3, 2, 5, 4, 6, 8, 9, 7, 10, 13, 14, 12, 15, 11, 19,
                     18, 20, 17, 21, 16, 25, 24, 26, 23, 27, 22, 28]
+            # The index of python begins from 0.
             distortion = distortion[[x - 1 for x in zidx]]
-        setattr(self, distType, distortion)
 
+        # This statement is bad. Check where do we need these attribute. Do we really need the attribute?
+        # Or we can just put it in the perturbation file writing.  
+        setattr(self, distType, distortion)
 
     def getPertFilefromBase(self, baserun):
         
