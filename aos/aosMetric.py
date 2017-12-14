@@ -91,6 +91,9 @@ class aosMetric(object):
         self.znx2 = np.zeros((self.nFieldp4, znwcs3))
         self.stampD = 2**np.ceil(np.log2(opdSize))
 
+        # Parameters
+        self.GQFWHMeff = None
+
     def getFWHMfromZ(self):
         self.fwhm = np.zeros(self.nField)
 

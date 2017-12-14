@@ -12,7 +12,7 @@ import multiprocessing
 
 import numpy as np
 from astropy.io import fits
-from astropy.time import Time, TimeDelta
+from astropy.time import Time
 import aos.aosCoTransform as ct
 from scipy.interpolate import Rbf
 
@@ -62,7 +62,7 @@ class aosTeleState(object):
         Initiate the aosTeleState class.
         
         Arguments:
-            simuParamDataDir {[str]} -- Directory of simulation parameter files (*.inst).
+            simuParamDataDir {[str]} -- Directory of simulation parameter files.
             inst {[str]} -- Instrument name (e.g. lsst or comcam10).
             simuParamFileName {[str]} -- Simulation parameter file name.
             iSim {[int]} -- Simulation number.
@@ -82,6 +82,9 @@ class aosTeleState(object):
             debugLevel {int} -- Debug level. The higher value gives more information. 
                                 (default: {0})
         """
+
+        # Iteration number
+        self.iIter = None
 
         # Type of active filter. It is noted that if the monochromatic wavelength (0.5 um)
         # is used, the band is "g".
@@ -128,6 +131,8 @@ class aosTeleState(object):
 
         self.M1M3surf = None
         self.M2surf = None
+
+        self.stateV0 = None
 
         # Read the file to get the parameters
         self.__readFile(self.instruFile)
@@ -220,14 +225,15 @@ class aosTeleState(object):
             # This inconsistency comes from getPrintthz() in mirror. But I do not understand the condition
             # in M1M3 compared with M2.
             # Check this with Bo.
+            # Suggeest to change the unit in aosM1M3 class at printthz_iter0() and G. Check with Bo.
             self.M1M3surf = (M1M3.printthz_iter0 + M1M3.G.dot(myu - u0))*1e6
 
             # Set the mirror print along z direction of M2 in iteration 0
             M2.setPrintthz_iter0(M2.getPrintthz(zenithAngle0))
 
             # This value should be copy of M2.printthz_iter0. Check this with Bo.
-            self.M2surf = M2.printthz_iter0
-            # self.M2surf = M2.printthz_iter0.copy()
+            # self.M2surf = M2.printthz_iter0
+            self.M2surf = M2.printthz_iter0.copy()
 
         # Do the temperature correction for mirror surface
         # Need to check with Bo to put this in run-time change for continuing update temperature or not.
@@ -249,8 +255,10 @@ class aosTeleState(object):
         # Get the camera distortion
         # Check with Bo that we need to allow the run time change of this variable or not.
         # I believe the answer should be yes.
+        # This part may be removed
         if (self.camRot is not None):
-            self.getCamDistortionAll(self.zAngle[0], 0, 0, 0)
+            # Check the inputs here with Bo.
+            self.__getCamDistortionAll(simuParamDataDir, self.zAngle[0], 0, 0, 0)
 
     def __getZenithAngleForIteration(self, zAngle, endIter, opSimHisDir=None):
         """
@@ -460,31 +468,240 @@ class aosTeleState(object):
 
         fid.close()
 
-    def getCamDistortionAll(self, zAngle, pre_elev, pre_camR, pre_temp_camR):
-        self.getCamDistortion(zAngle, 'L1RB', pre_elev, pre_camR, pre_temp_camR)
-        self.getCamDistortion(zAngle, 'L2RB', pre_elev, pre_camR, pre_temp_camR)
-        self.getCamDistortion(zAngle, 'FRB', pre_elev, pre_camR, pre_temp_camR)
-        self.getCamDistortion(zAngle, 'L3RB', pre_elev, pre_camR, pre_temp_camR)
-        self.getCamDistortion(zAngle, 'FPRB', pre_elev, pre_camR, pre_temp_camR)
-        self.getCamDistortion(zAngle, 'L1S1zer', pre_elev, pre_camR, pre_temp_camR)
-        self.getCamDistortion(zAngle, 'L2S1zer', pre_elev, pre_camR, pre_temp_camR)
-        self.getCamDistortion(zAngle, 'L3S1zer', pre_elev, pre_camR, pre_temp_camR)
-        self.getCamDistortion(zAngle, 'L1S2zer', pre_elev, pre_camR, pre_temp_camR)
-        self.getCamDistortion(zAngle, 'L2S2zer', pre_elev, pre_camR, pre_temp_camR)
-        self.getCamDistortion(zAngle, 'L3S2zer', pre_elev, pre_camR, pre_temp_camR)
+    def setIterNum(self, iIter):
+        """
         
-    def getCamDistortion(self, zAngle, distType, pre_elev, pre_camR, pre_temp_camR):
-        dataFile = os.path.join('data/camera', (distType + '.txt'))
-        data = np.loadtxt(dataFile, skiprows=1)
-        distortion = data[0, 3:] * np.cos(zAngle) +\
-            (data[1, 3:] * np.cos(self.camRot) +
-             data[2, 3:] * np.sin(self.camRot)) * np.sin(zAngle)
-        # pre-compensation
-        distortion -= data[0, 3:] * np.cos(pre_elev) +\
-            (data[1, 3:] * np.cos(pre_camR) +
-             data[2, 3:] * np.sin(pre_camR)) * np.sin(pre_elev)
+        Set the iteration number.
+        
+        Arguments:
+            iIter {[int]} -- Iteration number.
+        """
 
-        # simple temperature interpolation/extrapolation
+        self.iIter = iIter
+
+    def setPerFilePath(self, metr, wfs=None):
+        """
+        
+        Set the path of purturbation files.
+        
+        Arguments:
+            metr {[aosMetric]} -- aosMetric object.
+        
+        Keyword Arguments:
+            wfs {[aosWFS]} -- aosWFS object. (default: {None})
+        """
+
+        # Generate the iteration folder
+        iterFolder = "iter%d" % self.iIter
+        self.__generateFolder(self.imageDir, iterFolder)
+        self.__generateFolder(self.pertDir, iterFolder)
+    
+        # Set the path of perturbation file
+        self.pertFile = os.path.join(self.pertDir, iterFolder, 
+                                     "sim%d_iter%d_pert.txt" % (self.iSim, self.iIter))
+
+        # Replace the file extention to ".cmd"
+        self.pertCmdFile = os.path.splitext(self.pertFile)[0] + ".cmd"
+
+        # Replace the file extention to ".mat"
+        self.pertMatFile = os.path.splitext(self.pertFile)[0] + ".mat"
+
+        # Set the path of PSSN and ellipticity file path 
+        # Need to put this one to aosMetric class in the future
+        metr.PSSNFile = os.path.join(self.imageDir, iterFolder, 
+                                     "sim%d_iter%d_PSSN.txt" % (self.iSim, self.iIter))
+        metr.elliFile = os.path.join(self.imageDir, iterFolder, 
+                                     "sim%d_iter%d_elli.txt" % (self.iSim, self.iIter))
+
+        # Set the path related to OPD information
+        self.OPD_inst = os.path.join(self.pertDir, iterFolder, 
+                                     "sim%d_iter%d_opd%d.inst" % (self.iSim, self.iIter, metr.nFieldp4))
+
+        self.OPD_cmd = os.path.splitext(self.OPD_inst)[0] + ".cmd"
+
+        self.OPD_log = os.path.join(self.imageDir, iterFolder, 
+                                    "sim%d_iter%d_opd%d.log" % (self.iSim, self.iIter, metr.nFieldp4))
+
+        self.zTrueFile = os.path.join(self.imageDir, iterFolder, 
+                                      "sim%d_iter%d_opd.zer" % (self.iSim, self.iIter))
+
+        # Set the path of atmosphere for two exposures
+        self.atmFile = [os.path.join(self.imageDir, iterFolder, 
+                            "sim%d_iter%d_E00%d.atm" % (self.iSim, self.iIter, iexp)) for iexp in [0, 1]]
+
+        # Set the path of residue related to mirror surface
+        if (self.M1M3surf is not None):
+            self.M1M3zlist = os.path.join(self.pertDir, iterFolder, "sim%d_M1M3zlist.txt" % self.iSim)
+            self.resFile1 = os.path.join(self.pertDir, iterFolder, "sim%d_M1res.txt" % self.iSim)
+            self.resFile3 = os.path.join(self.pertDir, iterFolder, "sim%d_M3res.txt" % self.iSim)
+
+        if (self.M2surf is not None):
+            self.M2zlist = os.path.join(self.pertDir, iterFolder, "sim%d_M2zlist.txt" % self.iSim)
+            self.resFile2 = os.path.join(self.pertDir, iterFolder, "sim%d_M2res.txt" % self.iSim)
+
+        # Set the file path related to wavefront sensor (aosWFS class)
+        if (wfs is not None):
+            wfs.zFile = [os.path.join(self.imageDir, iterFolder, 
+                            "sim%d_iter%d_E00%d.z4c" % (self.iSim, self.iIter, iexp)) for iexp in [0, 1]]
+            wfs.catFile = [os.path.join(self.pertDir, iterFolder, 
+                                        "wfs_catalog_E00%d.txt" % iexp) for iexp in [0, 1]]
+            wfs.zCompFile = os.path.join(self.pertDir, iterFolder, "checkZ4C_iter%d.png" % self.iIter)
+
+            # Instrument file contains the information of stars and DOF used in PhoSim
+            if (wfs.nRun == 1):
+                self.WFS_inst = [os.path.join(self.pertDir, iterFolder, 
+                                              "sim%d_iter%d_wfs%d.inst" % (self.iSim, self.iIter, wfs.nWFS))]
+            else:
+                # There is a problem here. wfs.nRun > 1 for ComCam. But ComCam has no half chips. Check this with Bo.
+                self.WFS_inst = [os.path.join(self.pertDir, iterFolder, 
+                                 "sim%d_iter%d_wfs%d_%s.inst" % (self.iSim, self.iIter, wfs.nWFS, wfs.halfChip[irun])) 
+                                 for irun in range(wfs.nRun)]
+
+            # Log file from PhoSim
+            if (wfs.nRun == 1):
+                self.WFS_log = [os.path.join(self.imageDir, iterFolder, 
+                                              "sim%d_iter%d_wfs%d.log" % (self.iSim, self.iIter, wfs.nWFS))]
+            else:
+                # There is a problem here. wfs.nRun > 1 for ComCam. But ComCam has no half chips. Check this with Bo.
+                self.WFS_log = [os.path.join(self.imageDir, iterFolder, 
+                                "sim%d_iter%d_wfs%d_%s.log" % (self.iSim, self.iIter, wfs.nWFS, wfs.halfChip[irun])) 
+                                for irun in range(wfs.nRun)]
+
+            # Command file used in PhoSim
+            self.WFS_cmd = os.path.join(self.pertDir, iterFolder, 
+                                        "sim%d_iter%d_wfs%d.cmd" % (self.iSim, self.iIter, wfs.nWFS))                    
+
+    def readPrePerFile(self, metr=None, wfs=None):
+        """
+        
+        Read the perturbation data from the previous run.
+        
+        Keyword Arguments:
+            metr {[aosMetric]} -- aosMetric object. (default: {None})
+            wfs {[aosWFS]} -- aosWFS object. (default: {None})
+        """
+
+        # Read the data in the previous iteration
+        if (self.iIter > 0):
+
+            # Set the path of perturbation matrix file in the iteration 0
+            self.pertMatFile_0 = os.path.join(self.pertDir, "iter0", "sim%d_iter0_pert.mat" % self.iSim)
+
+            # Set the previous iteration folder
+            preIterFolder = "iter%d" % (self.iIter-1)
+
+            # Set the file path in the previous iteration
+            self.zTrueFile_m1 = os.path.join(self.imageDir, preIterFolder, 
+                                             "sim%d_iter%d_opd.zer" % (self.iSim, self.iIter-1))
+
+            self.pertMatFile_m1 = os.path.join(self.pertDir, preIterFolder, 
+                                               "sim%d_iter%d_pert.mat" % (self.iSim, self.iIter-1))
+
+            # Read the file in the previous iteration
+            self.stateV = np.loadtxt(self.pertMatFile_m1)            
+            self.stateV0 = np.loadtxt(self.pertMatFile_0)
+
+            # Read the wavefront in zk in the previous iteration
+            if (wfs is not None):
+                wfs.zFile_m1 = [os.path.join(self.imageDir, preIterFolder, 
+                                "sim%d_iter%d_E00%d.z4c" % (self.iSim, self.iIter-1, iexp)) 
+                                for iexp in [0, 1]]
+
+            # PSSN from last iteration needs to be known for shiftGear
+            if (metr is not None) and (metr.GQFWHMeff is None):
+                PSSNFile_m1 = os.path.join(self.imageDir, preIterFolder, 
+                                           "sim%d_iter%d_PSSN.txt" % (self.iSim, self.iIter-1))
+                data = np.loadtxt(PSSNFile_m1)
+                metr.GQFWHMeff = data[1, -1]
+
+    def __generateFolder(self, pathToFolder, newFolder):
+        """
+
+        Generate the folder if the folder does not exist.
+
+        Arguments:
+            pathToFolder {[string]} -- Path to folder.
+            newFolder {[string]} -- Name of new folder.
+        """
+
+        # Generate the path of new folder
+        pathToNewFolder = os.path.join(pathToFolder, newFolder)
+
+        # Check the existence of folder
+        if (not os.path.exists(pathToNewFolder)):
+            # Create the folder if it does not exist
+            os.makedirs(pathToNewFolder)
+
+    def update(self, uk, ctrlRange, M1M3=None, M2=None):
+        """
+        
+        Update the aggregated degree of freedom (DOF) and mirror surface if the elevation angle changes. 
+        
+        Arguments:
+            uk {[ndarray]} -- New estimated DOF from the optimal controller.
+            ctrlRange {[ndarray]} -- Allowed moving range for each DOF.
+        
+        Keyword Arguments:
+            M1M3 {[aosM1M3]} -- aosM1M3 object. (default: {None})
+            M2 {[aosM2]} -- aosM2 object. (default: {None})
+        
+        Raises:
+            RuntimeError -- Aggregated DOF overs the allowed range.
+        """
+
+        # Update the aggregated telescope state based on the estimated degree of freedom (DOF)
+        # by the control algorithm
+        self.stateV += uk
+
+        # Check the aggegated correction in the basis of DOF is in the allowed range or not
+        if np.any(self.stateV > ctrlRange):
+            ii = (self.stateV > ctrlRange).argmax()
+            raise RuntimeError("stateV[%d] = %e > its range = %e" % (ii, self.stateV[ii], ctrlRange[ii]))
+
+        # If the elevation angle changes, the print through maps need to change also.
+        if (self.M1M3surf is not None):
+            # Check this statement with Bo. If there is the unit inconsistency in the initialization (* 1e6), 
+            # there should be it here also.
+            self.M1M3surf += M1M3.getPrintthz(self.zAngle[self.iIter]) - M1M3.printthz_iter0
+
+        if (self.M2surf is not None):
+            self.M2surf += M2.getPrintthz(self.zAngle[self.iIter]) - M2.printthz_iter0
+
+    def __getCamDistortionAll(self, simuParamDataDir, zAngle, pre_elev, pre_camR, pre_temp_camR):
+        """
+        
+        Get the camera distortion parameters.
+        
+        Arguments:
+            simuParamDataDir {[str]} -- Directory of simulation parameter files.
+            zAngle {[float]} -- Zenith angle.
+            pre_elev {[float]} -- ?? Check with Bo.
+            pre_camR {[float]} -- ?? Check with Bo.
+            pre_temp_camR {[float]} -- ?? Check with Bo.
+        """
+
+        # List of camera distortion
+        # The first 5 types look like not to be used. Check with Bo.
+        distTypeList = ["L1RB", "L2RB", "FRB", "L3RB", "FPRB", 
+                        "L1S1zer", "L2S1zer", "L3S1zer", "L1S2zer", "L2S2zer", "L3S2zer"]
+        for distType in distTypeList:
+            self.__getCamDistortion(simuParamDataDir, zAngle, distType, pre_elev, pre_camR, pre_temp_camR)
+
+    def __getCamDistortion(self, simuParamDataDir, zAngle, distType, pre_elev, pre_camR, pre_temp_camR):
+
+        # Path to camera distortion parameter file
+        dataFile = os.path.join(simuParamDataDir, "camera", (distType + ".txt"))
+
+        # Read the distortion
+        data = np.loadtxt(dataFile, skiprows=1)
+
+        # Calculate the distortion (dx, dy, dz, rx, ry, rz)
+        # Check with Bo for the math here
+        distFun = lambda zenithAngle, camRotAngle: data[0, 3:]*np.cos(zenithAngle) + \
+                    ( data[1, 3:]*np.cos(camRotAngle) + data[2, 3:]*np.sin(camRotAngle) )*np.sin(zenithAngle)
+        distortion = distFun(zAngle, self.camRot) - distFun(pre_elev, pre_camR)
+
+        # Do the temperation correction by the simple temperature interpolation/ extrapolation
         if self.camTB < data[3, 2]:
             distortion += data[3, 3:]
         elif self.camTB > data[10, 2]:
@@ -497,6 +714,7 @@ class aosTeleState(object):
             distortion += w1 * data[p1, 3:] + w2 * data[p2, 3:]
 
         distortion -= data[(data[3:, 2] == pre_temp_camR).argmax() + 3, 3:]
+       
         # Andy's Zernike order is different, fix it
         if distType[-3:] == 'zer':
             zidx = [1, 3, 2, 5, 4, 6, 8, 9, 7, 10, 13, 14, 12, 15, 11, 19,
@@ -504,23 +722,6 @@ class aosTeleState(object):
             distortion = distortion[[x - 1 for x in zidx]]
         setattr(self, distType, distortion)
 
-    def update(self, uk, ctrlRange, M1M3=None, M2=None):
-        self.stateV += uk
-        if np.any(self.stateV > ctrlRange):
-            ii = (self.stateV > ctrlRange).argmax()
-            raise RuntimeError("ERROR: stateV[%d] = %e > its range = %e" % (
-                ii, self.stateV[ii], ctrlRange[ii]))
-
-        # elevation is changing, the print through maps need to change
-        if (self.M1M3surf is not None):
-            # Check this statement with Bo. If there is the unit inconsistency in the initialization (* 1e6)
-            # there should be it here.
-            self.M1M3surf += M1M3.getPrintthz(self.zAngle[self.iIter]) -\
-              M1M3.printthz_iter0
-
-        if (self.M2surf is not None):
-            self.M2surf += M2.getPrintthz(self.zAngle[self.iIter]) -\
-              M2.printthz_iter0
 
     def getPertFilefromBase(self, baserun):
         
@@ -559,6 +760,7 @@ class aosTeleState(object):
             os.link(baseFile, self.resFile2)
                         
     def writePertFile(self, ndofA, M1M3=None, M2=None):
+
         fid = open(self.pertFile, 'w')
         for i in range(ndofA):
             if (self.stateV[i] != 0):
@@ -570,8 +772,8 @@ class aosTeleState(object):
         fid.close()
         np.savetxt(self.pertMatFile, self.stateV)
 
-        fid = open(self.pertCmdFile, 'w')        
-        if hasattr(self, 'M1M3surf'):
+        fid = open(self.pertCmdFile, 'w')
+        if (self.M1M3surf is not None):
             # M1M3surf already converted into ZCRS
             writeM1M3zres(self.M1M3surf, M1M3.bx, M1M3.by, M1M3.Ri,
                               M1M3.R, M1M3.R3i, M1M3.R3, self.znPert, 
@@ -586,8 +788,8 @@ class aosTeleState(object):
             fid.write('surfacemap 0 %s 1\n' % os.path.abspath(self.resFile1))
             fid.write('surfacemap 2 %s 1\n' % os.path.abspath(self.resFile3))
             fid.write('surfacelink 2 0\n')
-            
-        if hasattr(self, 'M2surf'):
+        
+        if (self.M2surf is not None):
             # M2surf already converted into ZCRS
             writeM2zres(self.M2surf, M2.bx, M2.by, M2.R, M2.Ri,
                             self.znPert, self.M2zlist,
@@ -597,8 +799,8 @@ class aosTeleState(object):
             for i in range(self.znPert):
                 fid.write('izernike 1 %d %s\n' % (i, zz[i] * 1e-3))
             fid.write('surfacemap 1 %s 1\n' % os.path.abspath(self.resFile2))
-            
-        if hasattr(self, 'camRot') and self.inst[:4] == 'lsst':
+        
+        if (self.camRot is not None) and (self.inst == self.LSST):
             for i in range(self.znPert):
                 # Andy uses mm, same as Zemax
                 fid.write('izernike 3 %d %s\n' % (i, self.L1S1zer[i]))
@@ -610,121 +812,16 @@ class aosTeleState(object):
                 
         fid.close()
         
-    def setIterNo(self, metr, iIter, wfs=None):
-        self.iIter = iIter
-        self.timeIter = self.time0 + iIter*TimeDelta(39, format='sec')
-        #leave last digit for wavelength
-        self.obsID = 9000000 + self.iSim * 1000 + self.iIter * 10
-        self.pertFile = '%s/iter%d/sim%d_iter%d_pert.txt' % (
-            self.pertDir, self.iIter, self.iSim, self.iIter)
-        self.pertCmdFile = '%s/iter%d/sim%d_iter%d_pert.cmd' % (
-            self.pertDir, self.iIter, self.iSim, self.iIter)
-        self.pertMatFile = '%s/iter%d/sim%d_iter%d_pert.mat' % (
-            self.pertDir, self.iIter, self.iSim, self.iIter)
-        if not os.path.exists('%s/iter%d/' % (self.imageDir, self.iIter)):
-            os.makedirs('%s/iter%d/' % (self.imageDir, self.iIter))
-        if not os.path.exists('%s/iter%d/' % (self.pertDir, self.iIter)):
-            os.makedirs('%s/iter%d/' % (self.pertDir, self.iIter))
-
-        metr.PSSNFile = '%s/iter%d/sim%d_iter%d_PSSN.txt' % (
-            self.imageDir, self.iIter, self.iSim, self.iIter)
-        metr.elliFile = '%s/iter%d/sim%d_iter%d_elli.txt' % (
-            self.imageDir, self.iIter, self.iSim, self.iIter)
-        if wfs is not None:
-            wfs.zFile = ['%s/iter%d/sim%d_iter%d_E00%d.z4c' % (
-                self.imageDir, self.iIter, self.iSim, self.iIter,
-                iexp) for iexp in [0, 1]]
-            wfs.catFile = ['%s/iter%d/wfs_catalog_E00%d.txt' % (
-                self.pertDir, self.iIter, iexp) for iexp in [0, 1]]
-            wfs.zCompFile = '%s/iter%d/checkZ4C_iter%d.png' % (
-                self.pertDir, self.iIter, self.iIter)
-
-            self.WFS_inst = []
-            for irun in range(wfs.nRun):
-                if wfs.nRun == 1:
-                    self.WFS_inst.append(
-                        '%s/iter%d/sim%d_iter%d_wfs%d.inst' % (
-                            self.pertDir, self.iIter, self.iSim, self.iIter,
-                            wfs.nWFS))
-                else:
-                    self.WFS_inst.append(
-                        '%s/iter%d/sim%d_iter%d_wfs%d_%s.inst' % (
-                            self.pertDir, self.iIter, self.iSim, self.iIter,
-                            wfs.nWFS, wfs.halfChip[irun]))
-            self.WFS_log = []
-            for irun in range(wfs.nRun):
-                if wfs.nRun == 1:
-                    self.WFS_log.append(
-                        '%s/iter%d/sim%d_iter%d_wfs%d.log' % (
-                            self.imageDir, self.iIter, self.iSim, self.iIter,
-                            wfs.nWFS))
-                else:
-                    self.WFS_log.append(
-                        '%s/iter%d/sim%d_iter%d_wfs%d_%s.log' % (
-                            self.imageDir, self.iIter, self.iSim, self.iIter,
-                            wfs.nWFS, wfs.halfChip[irun]))
-            self.WFS_cmd = '%s/iter%d/sim%d_iter%d_wfs%d.cmd' % (
-                self.pertDir, self.iIter, self.iSim, self.iIter, wfs.nWFS)
-
-                    
-        self.OPD_inst = '%s/iter%d/sim%d_iter%d_opd%d.inst' % (
-                    self.pertDir, self.iIter, self.iSim, self.iIter,
-                    metr.nFieldp4)
-        self.OPD_cmd = '%s/iter%d/sim%d_iter%d_opd%d.cmd' % (
-            self.pertDir, self.iIter, self.iSim, self.iIter, metr.nFieldp4)
-        self.OPD_log = '%s/iter%d/sim%d_iter%d_opd%d.log' % (
-                    self.imageDir, self.iIter, self.iSim, self.iIter,
-                    metr.nFieldp4)
-        self.zTrueFile =  '%s/iter%d/sim%d_iter%d_opd.zer' % (
-                    self.imageDir, self.iIter, self.iSim, self.iIter)
-        self.atmFile = ['%s/iter%d/sim%d_iter%d_E00%d.atm' % (
-                    self.imageDir, self.iIter, self.iSim, self.iIter,
-            iexp) for iexp in [0, 1]]
-
-        if hasattr(self, 'M1M3surf'):
-            self.M1M3zlist = '%s/iter%d/sim%d_M1M3zlist.txt' % (
-                self.pertDir, self.iIter, self.iSim)
-            self.resFile1 = '%s/iter%d/sim%d_M1res.txt' % (
-                self.pertDir, self.iIter, self.iSim)
-            self.resFile3 = '%s/iter%d/sim%d_M3res.txt' % (
-                self.pertDir, self.iIter, self.iSim)
-        if hasattr(self, 'M2surf'):
-            self.M2zlist = '%s/iter%d/sim%d_M2zlist.txt' % (
-                self.pertDir, self.iIter, self.iSim)
-            self.resFile2 = '%s/iter%d/sim%d_M2res.txt' % (
-                self.pertDir, self.iIter, self.iSim)
-        if iIter > 0:
-            self.zTrueFile_m1 = '%s/iter%d/sim%d_iter%d_opd.zer' % (
-                        self.imageDir, self.iIter - 1, self.iSim,
-                            self.iIter - 1)                
-            self.pertMatFile_m1 = '%s/iter%d/sim%d_iter%d_pert.mat' % (
-                self.pertDir, self.iIter - 1, self.iSim, self.iIter - 1)
-            self.stateV = np.loadtxt(self.pertMatFile_m1)
-            self.pertMatFile_0 = '%s/iter0/sim%d_iter0_pert.mat' % (
-                self.pertDir, self.iSim)
-            self.stateV0 = np.loadtxt(self.pertMatFile_0)
-            if wfs is not None:
-                wfs.zFile_m1 = ['%s/iter%d/sim%d_iter%d_E00%d.z4c' % (
-                    self.imageDir, self.iIter - 1, self.iSim, self.iIter - 1,
-                    iexp) for iexp in [0, 1]]
-
-            # PSSN from last iteration needs to be known for shiftGear
-            if not (hasattr(metr, 'GQFWHMeff')):
-                metr.PSSNFile_m1 = '%s/iter%d/sim%d_iter%d_PSSN.txt' % (
-                    self.imageDir, self.iIter - 1, self.iSim, self.iIter - 1)
-                aa = np.loadtxt(metr.PSSNFile_m1)
-                metr.GQFWHMeff = aa[1, -1]
-
-    def getOPDAll(self, opdoff, metr, numproc, znwcs,
+    def getOPDAll(self, obsID, opdoff, metr, numproc, znwcs,
                   obscuration, debugLevel):
 
         if not opdoff:
-            self.writeOPDinst(metr)
+            self.writeOPDinst(obsID, metr)
             self.writeOPDcmd(metr)
             argList = []
                     
             srcFile = '%s/output/opd_%d.fits.gz' % (
-                self.phosimDir, self.obsID)
+                self.phosimDir, obsID)
             dstFile = '%s/iter%d/sim%d_iter%d_opd.fits.gz' % (
                 self.imageDir, self.iIter, self.iSim, self.iIter)
 
@@ -774,13 +871,13 @@ class aosTeleState(object):
             os.link(baseFile, self.OPD_cmd)
 
 
-    def writeOPDinst(self, metr):
+    def writeOPDinst(self, obsID, metr):
 
         fid = open(self.OPD_inst, 'w')
         fid.write('Opsim_filter %d\n\
 Opsim_obshistid %d\n\
 SIM_VISTIME 15.0\n\
-SIM_NSNAP 1\n' % (phosimFilterID[self.band], self.obsID))
+SIM_NSNAP 1\n' % (phosimFilterID[self.band], obsID))
         fpert = open(self.pertFile, 'r')
         fid.write(fpert.read())
         for irun in range(self.nOPDw):
@@ -807,10 +904,10 @@ perturbationmode 1\n')
         fpert.close()
         fid.close()
 
-    def getPSFAll(self, psfoff, metr, numproc, debugLevel, pixelum=10):
+    def getPSFAll(self, obsID, psfoff, metr, numproc, debugLevel, pixelum=10):
 
         if not psfoff:
-            self.writePSFinst(metr)
+            self.writePSFinst(obsID, metr)
             self.writePSFcmd(metr)
             self.PSF_log = '%s/iter%d/sim%d_iter%d_psf%d.log' % (
                 self.imageDir, self.iIter, self.iSim, self.iIter, metr.nField)
@@ -842,12 +939,12 @@ perturbationmode 1\n')
                     px = 2000
                     py = 2000
                 src = glob.glob('%s/output/%s*%d_f%d_%s*E000.fit*' % (
-                    self.phosimDir, instiq, self.obsID, phosimFilterID[self.band],
+                    self.phosimDir, instiq, obsID, phosimFilterID[self.band],
                     chipStr))
                 if len(src) == 0:
                     raise RuntimeError(
                         "cannot find Phosim output: osbID=%d, chipStr = %s" % (
-                            self.obsID, chipStr))
+                            obsID, chipStr))
                 elif 'gz' in src[0]:
                     # when .fits and .fits.gz both exist
                     # which appears first seems random
@@ -959,7 +1056,7 @@ perturbationmode 1\n')
             baseFile = pngFile.replace('sim%d' % self.iSim, 'sim%d' % baserun)
             os.link(baseFile, pngFile)
 
-    def writePSFinst(self, metr):
+    def writePSFinst(self, obsID, metr):
         self.PSF_inst = '%s/iter%d/sim%d_iter%d_psf%d.inst' % (
             self.pertDir, self.iIter, self.iSim, self.iIter, metr.nField)
         fid = open(self.PSF_inst, 'w')
@@ -968,8 +1065,8 @@ Opsim_obshistid %d\n\
 SIM_VISTIME 15.0\n\
 SIM_NSNAP 1\n\
 SIM_SEED %d\n\
-SIM_CAMCONFIG 1\n' % (phosimFilterID[self.band], self.obsID,
-                      self.obsID % 10000 + 31))
+SIM_CAMCONFIG 1\n' % (phosimFilterID[self.band], obsID,
+                      obsID % 10000 + 31))
         fpert = open(self.pertFile, 'r')
 
         fid.write(fpert.read())
@@ -1005,9 +1102,9 @@ detectormode 0\n')
         fpert.close()        
         fid.close()
 
-    def getWFSAll(self, wfs, metr, numproc, debugLevel):
+    def getWFSAll(self, obsID, timeIter, wfs, metr, numproc, debugLevel):
 
-        self.writeWFSinst(wfs, metr)
+        self.writeWFSinst(obsID, timeIter, wfs, metr)
         self.writeWFScmd(wfs)
         argList = []
         for irun in range(wfs.nRun):
@@ -1030,7 +1127,7 @@ detectormode 0\n')
                 for ioffset in [0, 1]:
                     for iexp in [0, 1]:
                         src = glob.glob('%s/output/*%s_f%d_%s*%s*E00%d.fit*' %
-                                    (self.phosimDir, self.obsID,
+                                    (self.phosimDir, obsID,
                                         phosimFilterID[self.band],
                                     chipStr, wfs.halfChip[ioffset], iexp))
                         if '.gz' in src[0]:
@@ -1043,7 +1140,7 @@ detectormode 0\n')
             else: # need to pick up two sets of fits.gz with diff phosim ID
                 for ioffset in [0, 1]:
                     src = glob.glob('%s/output/*%s_f%d_%s*E000.fit*' %
-                                    (self.phosimDir, self.obsID + ioffset,
+                                    (self.phosimDir, obsID + ioffset,
                                         phosimFilterID[self.band],
                                     chipStr))
                     if '.gz' in src[0]:
@@ -1057,7 +1154,7 @@ detectormode 0\n')
                             (chipFile, self.imageDir, self.iIter,
                                 targetFile))
 
-    def writeWFSinst(self, wfs, metr):
+    def writeWFSinst(self, obsID, timeIter, wfs, metr):
         for irun in range(wfs.nRun):
             fid = open(self.WFS_inst[irun], 'w')
             fid.write('Opsim_filter %d\n\
@@ -1067,8 +1164,8 @@ SIM_VISTIME 33.0\n\
 SIM_NSNAP 2\n\
 SIM_SEED %d\n\
 Opsim_rawseeing -1\n' % (phosimFilterID[self.band],
-                             self.obsID + irun, self.timeIter.mjd,
-                             self.obsID % 10000 + 4))
+                             obsID + irun, timeIter.mjd,
+                             obsID % 10000 + 4))
             fpert = open(self.pertFile, 'r')
             hasCamPiston = False #pertFile already includes move 10
             for line in fpert:

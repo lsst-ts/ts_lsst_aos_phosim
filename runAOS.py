@@ -19,6 +19,8 @@ from aos.aosM2 import aosM2
 from aos.aosTeleState import aosTeleState, getTelEffWave
 from aos.aosUtility import showControlPanel, showSummaryPlots
 
+from astropy.time import TimeDelta
+
 def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="offAxis"):
     """
 
@@ -36,7 +38,7 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
         cwfsModel {[str]} -- Optical model. (default: {"offAxis"})
     """
 
-    # global state
+    # global state, M1M3, M2, ctrl
 
     # Instantiate the parser for command line to use
     parser = __setParseAugs()
@@ -108,9 +110,8 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
     # Instantiate the AOS telescope state
     state = aosTeleState(aosDataDir, args.inst, args.simuParam, args.iSim, esti.ndofA,
                          phosimDir, pertDir, imageDir, band, wavelength,
-                         args.enditer, args.debugLevel, M1M3=M1M3, M2=M2)
-
-    # sys.exit()
+                         args.enditer, M1M3=M1M3, M2=M2, opSimHisDir=aosDataDir, 
+                         debugLevel=args.debugLevel)
 
     # *****************************************
     # control algorithm
@@ -121,6 +122,8 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
     ctrl = aosController(aosDataDir, args.inst, args.controllerParam, esti, metr,
                          M1M3.force, M2.force, effwave, args.gain, covM=wfs.covM, 
                          debugLevel=args.debugLevel)
+
+    # sys.exit()
 
     # *****************************************
     # start the Loop
@@ -133,14 +136,26 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
         if (args.debugLevel >= 3):
             print("iteration No. %d" % iIter)
 
-        # Set the telescope status in ith iteration
-        state.setIterNo(metr, iIter, wfs=wfs)
+        # Observation ID
+        obsID = 9000000 + args.iSim*1000 + iIter*10
+
+        # Iteration time in the format of MJD
+        timeIter = state.time0 + iIter*TimeDelta(39, format="sec")
+
+        # Set the telescope iteration number
+        state.setIterNum(iIter)
+
+        # Set the path of perturbation file
+        state.setPerFilePath(metr, wfs=wfs)
+
+        # Read the perturbation file in the previous iteration run
+        state.readPrePerFile(metr=metr, wfs=wfs)
 
         if (not args.ctrloff):
 
             # Update the telescope status
             if (iIter > 0):
-                yfinal, yresi = esti.estimate(state, wfs, ctrl.y2File, args.sensor, authority=ctrl.Authority)
+                yfinal, yresi = esti.estimate(state, wfs, ctrl.y2File, args.sensor, authority=ctrl.Authority, obsID=obsID)
                 uk = ctrl.getMotions(esti, metr, nWFS=wfs.nWFS, state=state)
 
                 # Draw the dof and Zk 
@@ -154,7 +169,7 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
 
                 # Need to remake the pert file here.
                 # It will be inserted into OPD.inst, PSF.inst later
-                state.update(uk, ctrl.range, M1M3, M2)
+                state.update(uk, ctrl.range, M1M3=M1M3, M2=M2)
 
             if (args.baserun > 0 and iIter == 0):
                 # Read the telescope status from the resetted baserun iteration
@@ -174,9 +189,9 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
                 wfs.getZ4CfromBase(args.baserun, state.iSim)
 
         else:
-            state.getOPDAll(args.opdoff, metr, args.numproc, wfs.znwcs, wfs.inst.obscuration,
+            state.getOPDAll(obsID, args.opdoff, metr, args.numproc, wfs.znwcs, wfs.inst.obscuration,
                             args.debugLevel)
-            state.getPSFAll(args.psfoff, metr, args.numproc, args.debugLevel)
+            state.getPSFAll(obsID, args.psfoff, metr, args.numproc, args.debugLevel)
             metr.getPSSNandMore(args.pssnoff, state, args.numproc, args.debugLevel)
             metr.getEllipticity(args.ellioff, state, args.numproc, args.debugLevel)
 
@@ -184,8 +199,8 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
 
                 if (args.sensor == "phosim"):
                     # Create donuts for last iter, so that picking up from there will be easy
-                    state.getWFSAll(wfs, metr, args.numproc, args.debugLevel)
-                    wfs.preprocess(state, metr, args.debugLevel)
+                    state.getWFSAll(obsID, timeIter, wfs, metr, args.numproc, args.debugLevel)
+                    wfs.preprocess(obsID, state, metr, args.debugLevel)
 
                 if args.sensor in ("phosim", "cwfs"):
                     wfs.parallelCwfs(cwfsModel, args.numproc)

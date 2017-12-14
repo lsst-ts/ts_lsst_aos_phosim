@@ -338,7 +338,7 @@ class aosEstimator(object):
         # A^(-1) = X * A.T * ( A * X * A.T + M )^(-1)
         self.Ainv = X.dot(self.Anorm.T).dot(np.linalg.pinv(self.Anorm.dot(X).dot(self.Anorm.T) + covM))
 
-    def estimate(self, state, wfs, ctrlY2File, sensor, authority=None):
+    def estimate(self, state, wfs, ctrlY2File, sensor, authority=None, obsID=None):
         """
         
         Estimate the degree of freedom by "x^{hat} = pinv(A) * y". A is the sensitivity matrix 
@@ -352,6 +352,7 @@ class aosEstimator(object):
         
         Keyword Arguments:
             authority {[ndarray]} -- Authority array for each DOF. (default: {None})
+            obsID {[int]} -- Observation ID. (default: {None})
 
         Returns:
             [ndarray] -- Calculated Zk.
@@ -400,7 +401,7 @@ class aosEstimator(object):
 
                 # Seed the generator. By using this statement, the user can always get 
                 # the same random numbers.
-                np.random.seed(state.obsID)
+                np.random.seed(obsID)
                 
                 # Add the random samples from a multivariate normal distribution.
                 yfinal += np.random.multivariate_normal(mu, wfs.covM).reshape(-1, 1)
@@ -424,7 +425,7 @@ class aosEstimator(object):
         # Get the zk after the removing of affection from y2c
         z_k = yfinal[self.zn3IdxAxnWFS] - y2c
 
-        # Do not sure to keep this part of Kalman filter or not. Check with Bo.
+        # Use the Kalman filter or not
         if (self.strategy == "kalman"):
 
             # the input to each iteration (in addition to Q and R) :

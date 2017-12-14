@@ -407,6 +407,7 @@ class aosController(object):
                 # uk = gain * F * [ rho^2 * H * (x_{0} - x_{k}) - xhat_{k+1} ]
                 # Check this one with Bo. state.stateV0 is hard coded to use "iter0_pert.mat", which is zero actually.
                 # Based on this point, there is no different between "0" and "x00" here.
+                # A possibility is to put the initial V0 in iter0_pert.mat. But do not see that here.
                 uk[esti.dofIdx] = gainUse * self.mF.dot(
                             self.rho**2 * self.mH.dot(state.stateV0[esti.dofIdx] - state.stateV[esti.dofIdx]) - Mx)
 

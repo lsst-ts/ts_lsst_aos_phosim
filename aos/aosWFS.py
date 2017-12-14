@@ -146,13 +146,14 @@ class aosWFS(object):
             print(self.intrinsicWFS.shape)
             print(self.intrinsicWFS[:5])
 
-    def preprocess(self, state, metr, debugLevel=0):
+    def preprocess(self, obsID, state, metr, debugLevel=0):
         """
         
         Analyze the phosim images to get donuts as separate small images and related 
         field x, y.
         
         Arguments:
+            obsID {[int]} -- Observation ID.
             state {[aosTeleState]} -- State of telescope.
             metr {[aosMetric]} -- Metrology of telescope.
         
@@ -179,10 +180,10 @@ class aosWFS(object):
 
                     # nRun = 1 for lsst and nRun = 2 for comcam
                     if (self.nRun == 1):
-                        visit = state.obsID                    
+                        visit = obsID                    
                     else:
                         # Add the index for the comcam
-                        visit = state.obsID + ioffset
+                        visit = obsID + ioffset
 
                     # Get the list of paths matching the pathname pattern
                     patheNamePattern = os.path.join(state.imageDir, "iter%d" % state.iIter, 
