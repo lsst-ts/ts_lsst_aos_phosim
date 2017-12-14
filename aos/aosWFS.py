@@ -16,7 +16,7 @@ from lsst.cwfs.algorithm import Algorithm
 from lsst.cwfs.instrument import Instrument
 from lsst.cwfs.image import Image, readFile
 
-from aos.aosUtility import getInstName
+from aos.aosUtility import getInstName, hardLinkFile
 
 import matplotlib.pylab as plt
 
@@ -577,33 +577,11 @@ class aosWFS(object):
         # Get Zk from the specific file which is assigned as a base run (iter0)
         for iexp in range(self.nExp):
     
-            if not os.path.isfile(self.zFile[iexp]):
-
-                # Hard link the file to avoid the repeated calculation
-                self.__hardLinkFile(self.zFile[iexp], baserun, stateSimNum)
-    
-        if not os.path.isfile(self.zCompFile):
-
             # Hard link the file to avoid the repeated calculation
-            self.__hardLinkFile(self.zCompFile, baserun, stateSimNum)
+            hardLinkFile(self.zFile[iexp], baserun, stateSimNum)
 
-    def __hardLinkFile(self, targetFilePath, sourceNum, targetNum):
-        """
-        
-        Hard link the past calculation result instead of repeated calculation.
-        
-        Arguments:
-            targetFilePath {[str]} -- Path of file that is intended to do the hard link 
-                                      with the previous result.
-            sourceNum {[int]} -- Source simulation number.
-            targetNum {[int]} -- Target simulation number.
-        """
-
-        # Get the path of base run file by changing the simulation number
-        sourceFilePath = targetFilePath.replace("sim%d" % targetNum, "sim%d" % sourceNum)
-
-        # Construct a hard link
-        os.link(sourceFilePath, targetFilePath)
+        # Hard link the file to avoid the repeated calculation
+        hardLinkFile(self.zCompFile, baserun, stateSimNum)
 
 def runcwfs(argList):
     """

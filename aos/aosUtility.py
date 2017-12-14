@@ -720,6 +720,26 @@ def getLUTforce(zangle, LUTfile):
 
     return lutForce
 
+def hardLinkFile(targetFilePath, sourceNum, targetNum):
+    """
+    
+    Hard link the past calculation result instead of repeated calculation.
+    
+    Arguments:
+        targetFilePath {[str]} -- Path of file that is intended to do the hard link 
+                                  with the previous result.
+        sourceNum {[int]} -- Source simulation number.
+        targetNum {[int]} -- Target simulation number.
+    """
+
+    if not os.path.isfile(targetFilePath):
+
+        # Get the path of base run file by changing the simulation number
+        sourceFilePath = targetFilePath.replace("sim%d" % targetNum, "sim%d" % sourceNum)
+
+        # Construct a hard link
+        os.link(sourceFilePath, targetFilePath)
+
 if __name__ == "__main__":
 
     uk = np.arange(50)

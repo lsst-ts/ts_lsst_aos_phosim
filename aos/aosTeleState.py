@@ -18,7 +18,7 @@ from scipy.interpolate import Rbf
 
 from lsst.cwfs.tools import ZernikeAnnularFit, ZernikeFit, ZernikeEval, extractArray
 
-from aos.aosUtility import getInstName, isNumber, getLUTforce
+from aos.aosUtility import getInstName, isNumber, getLUTforce, hardLinkFile
 
 import matplotlib.pyplot as plt
 
@@ -171,6 +171,7 @@ class aosTeleState(object):
         # M1M3 and M2 bending modes
         # Check with Bo for the index of "nodfA" in PhoSim. It is wield if M1M3 and M2 have different 
         # bending modes. Does M1M3 begin from 15 and M2 begin from 35 
+        # It looks like the index in PhoSim has been hardcoded based on writePertFile(). Check with Bo.
         phoSimStartIdx = 5
         self.phosimActuatorID = range(phoSimStartIdx, ndofA+phoSimStartIdx)
 
@@ -436,7 +437,12 @@ class aosTeleState(object):
                 elif (line.startswith("M2TrGrad")):
                     self.M2TrGrad = float(line.split()[1])
                 
-                # Maximum number of Zn to define the surface in perturbation file 
+                # Maximum number of Zn to define the surface in perturbation file
+                # Check I can use "znPert = 20" or not. This is for the annular Zk in my WEP code.
+                # Check the reason to use the spherical Zk. If I use annular Zk, what will happen?
+                # From the phosim command, does it mean only spherical Zk is allowed?
+                # https://bitbucket.org/phosim/phosim_release/wiki/Physics%20Commands
+                # But the dof and uk is in the basis of annular Zk, which is different from PhoSim.  
                 # Check with Bo for this
                 elif (line.startswith("znPert")):
                     self.znPert = int(line.split()[1])
@@ -763,94 +769,100 @@ class aosTeleState(object):
         setattr(self, distType, distortion)
 
     def getPertFilefromBase(self, baserun):
+        """
         
-        if not os.path.isfile(self.pertFile):
-            baseFile = self.pertFile.replace(
-                'sim%d' % self.iSim, 'sim%d' % baserun)
-            os.link(baseFile, self.pertFile)
-        if not os.path.isfile(self.pertMatFile):
-            baseFile = self.pertMatFile.replace(
-                'sim%d' % self.iSim, 'sim%d' % baserun)
-            os.link(baseFile, self.pertMatFile)
-        if not os.path.isfile(self.pertCmdFile):
-            baseFile = self.pertCmdFile.replace(
-                'sim%d' % self.iSim, 'sim%d' % baserun)
-            os.link(baseFile, self.pertCmdFile)
+        Hard link the perturbation files to avoid the repeated calculation.
+        
+        Arguments:
+            baserun {[int]} -- Source simulation number (basement run).
+        """
 
-        if not os.path.isfile(self.M1M3zlist):
-            baseFile = self.M1M3zlist.replace(
-                'sim%d' % self.iSim, 'sim%d' % baserun)
-            os.link(baseFile, self.M1M3zlist)
-        if not os.path.isfile(self.resFile1):
-            baseFile = self.resFile1.replace(
-                'sim%d' % self.iSim, 'sim%d' % baserun)
-            os.link(baseFile, self.resFile1)
-        if not os.path.isfile(self.resFile3):
-            baseFile = self.resFile3.replace(
-                'sim%d' % self.iSim, 'sim%d' % baserun)
-            os.link(baseFile, self.resFile3)
-        if not os.path.isfile(self.M2zlist):
-            baseFile = self.M2zlist.replace(
-                'sim%d' % self.iSim, 'sim%d' % baserun)
-            os.link(baseFile, self.M2zlist)
-        if not os.path.isfile(self.resFile2):
-            baseFile = self.resFile2.replace(
-                'sim%d' % self.iSim, 'sim%d' % baserun)
-            os.link(baseFile, self.resFile2)
+        # File list to do the hard link 
+        hardLinkFileList = [self.pertFile, self.pertMatFile, self.pertCmdFile, self.M1M3zlist, 
+                            self.resFile1, self.resFile3, self.M2zlist, self.resFile2]
+
+        # Hard link the file to avoid the repeated calculation
+        for aFile in hardLinkFileList:
+            hardLinkFile(aFile, baserun, self.iSim)
                         
     def writePertFile(self, ndofA, M1M3=None, M2=None):
+        """
+        
+        Write the perturbation file for the aggregated degree of freedom of telescope, mirror 
+        surface on z-axis in Zk, and camera lens distortion in Zk.
+        
+        Arguments:
+            ndofA {[int]} -- Number of degree of freedom.
+        
+        Keyword Arguments:
+            M1M3 {[aosM1M3]} -- aosM1M3 object. (default: {None})
+            M2 {[aosM2]} -- aosM2 object. (default: {None})
+        """
 
-        fid = open(self.pertFile, 'w')
-        for i in range(ndofA):
-            if (self.stateV[i] != 0):
-                # don't add comments after each move command,
+        # Write the perturbation file (aggregated degree of freedom of telescope)
+        fid = open(self.pertFile, "w")
+        for ii in range(ndofA):
+            if (self.stateV[ii] != 0):
+                # Don't add comments after each move command,
                 # Phosim merges all move commands into one!
-                fid.write('move %d %7.4f \n' % (
-                    self.phosimActuatorID[i], self.stateV[i]))
+                fid.write("move %d %7.4f \n" % (self.phosimActuatorID[ii], self.stateV[ii]))
             
         fid.close()
         np.savetxt(self.pertMatFile, self.stateV)
 
-        fid = open(self.pertCmdFile, 'w')
+        # Write the perturbation command file
+        fid = open(self.pertCmdFile, "w")
+
+        # M1M3 surface print
         if (self.M1M3surf is not None):
             # M1M3surf already converted into ZCRS
-            writeM1M3zres(self.M1M3surf, M1M3.bx, M1M3.by, M1M3.Ri,
-                              M1M3.R, M1M3.R3i, M1M3.R3, self.znPert, 
-                              self.M1M3zlist, self.resFile1,
-                              self.resFile3, M1M3.nodeID,
-                              self.surfaceGridN)
+            writeM1M3zres(self.M1M3surf, M1M3.bx, M1M3.by, M1M3.Ri, M1M3.R, M1M3.R3i, 
+                          M1M3.R3, self.znPert, self.M1M3zlist, self.resFile1,
+                          self.resFile3, M1M3.nodeID, self.surfaceGridN)
+           
+            # Not sure it is a good idea or not to use the M1M3zList for M1 and M3
+            # correction together. This makes the z-axis offset to be the same.
+            # I do not think this is coorect. Check with Bo for this.
+            # But this also depends the initial FEA model study for the fitting.
+            # Check with Bo.
             zz = np.loadtxt(self.M1M3zlist)
-            for i in range(self.znPert):
-                fid.write('izernike 0 %d %s\n' % (i, zz[i] * 1e-3))
-            for i in range(self.znPert):
-                fid.write('izernike 2 %d %s\n' % (i, zz[i] * 1e-3))
-            fid.write('surfacemap 0 %s 1\n' % os.path.abspath(self.resFile1))
-            fid.write('surfacemap 2 %s 1\n' % os.path.abspath(self.resFile3))
-            fid.write('surfacelink 2 0\n')
-        
+            for ii in range(self.znPert):
+                fid.write("izernike 0 %d %s\n" % (ii, zz[ii]*1e-3))
+            for ii in range(self.znPert):
+                fid.write("izernike 2 %d %s\n" % (ii, zz[ii]*1e-3))
+           
+            fid.write("surfacemap 0 %s 1\n" % os.path.abspath(self.resFile1))
+            fid.write("surfacemap 2 %s 1\n" % os.path.abspath(self.resFile3))
+
+            # The meaning of surfacelink? Do not find it in:
+            # https://bitbucket.org/phosim/phosim_release/wiki/Physics%20Commands
+            # Check this with Bo 
+            fid.write("surfacelink 2 0\n")
+
+        # M2 surface print
         if (self.M2surf is not None):
             # M2surf already converted into ZCRS
-            writeM2zres(self.M2surf, M2.bx, M2.by, M2.R, M2.Ri,
-                            self.znPert, self.M2zlist,
-                            self.resFile2,
-                            self.surfaceGridN)
+            writeM2zres(self.M2surf, M2.bx, M2.by, M2.R, M2.Ri, self.znPert, 
+                        self.M2zlist, self.resFile2, self.surfaceGridN)
             zz = np.loadtxt(self.M2zlist)
-            for i in range(self.znPert):
-                fid.write('izernike 1 %d %s\n' % (i, zz[i] * 1e-3))
-            fid.write('surfacemap 1 %s 1\n' % os.path.abspath(self.resFile2))
+            for ii in range(self.znPert):
+                fid.write("izernike 1 %d %s\n" % (ii, zz[ii]*1e-3))
+
+            fid.write("surfacemap 1 %s 1\n" % os.path.abspath(self.resFile2))
         
+        # Camera lens correction in Zk. ComCam has no such data now.
         if (self.camRot is not None) and (self.inst == self.LSST):
-            for i in range(self.znPert):
-                # Andy uses mm, same as Zemax
-                fid.write('izernike 3 %d %s\n' % (i, self.L1S1zer[i]))
-                fid.write('izernike 4 %d %s\n' % (i, self.L1S2zer[i]))
-                fid.write('izernike 5 %d %s\n' % (i, self.L2S1zer[i]))
-                fid.write('izernike 6 %d %s\n' % (i, self.L2S2zer[i]))
-                fid.write('izernike 9 %d %s\n' % (i, self.L3S1zer[i]))
-                fid.write('izernike 10 %d %s\n' % (i, self.L3S2zer[i]))
+            for ii in range(self.znPert):
+                # Andy uses mm, same unit as Zemax
+                fid.write("izernike 3 %d %s\n" % (ii, self.L1S1zer[ii]))
+                fid.write("izernike 4 %d %s\n" % (ii, self.L1S2zer[ii]))
+                fid.write("izernike 5 %d %s\n" % (ii, self.L2S1zer[ii]))
+                fid.write("izernike 6 %d %s\n" % (ii, self.L2S2zer[ii]))
+                fid.write("izernike 9 %d %s\n" % (ii, self.L3S1zer[ii]))
+                fid.write("izernike 10 %d %s\n" % (ii, self.L3S2zer[ii]))
                 
         fid.close()
-        
+
     def getOPDAll(self, obsID, opdoff, metr, numproc, znwcs,
                   obscuration, debugLevel):
 
