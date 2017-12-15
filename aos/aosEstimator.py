@@ -419,7 +419,7 @@ class aosEstimator(object):
         # y2c: correction. Zk offset between corner and center.
         y2cData = np.loadtxt(ctrlY2File)
 
-        # Check with Bo for this. What is the meaning of dimension 1 in y2cData?
+        # For the y2cData, the row is the field point and  column is the Zk.
         y2c = y2cData[-wfs.nWFS:, 0:self.znMax - 3].reshape((-1, 1))
 
         # Get the zk after the removing of affection from y2c

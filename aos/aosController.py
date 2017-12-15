@@ -11,8 +11,8 @@ from aos.aosUtility import getInstName
 
 class aosController(object):
 
-    # Rigid body stroke
-    # Check with Bo for the unit and how to get this
+    # Allowed moving range of rigid body of M2 hexapod and Camera hexapod in the unit of um
+    # e.g. rbStroke[0] means the M2 piston is allowed to move +5900 um to -5900 um.
     rbStroke = np.array([5900, 6700, 6700, 432, 432, 8700, 7600, 7600, 864, 864])
 
     def __init__(self, ctrlDir, instruFile, paramFile, esti, metr, M1M3Force, M2Force,
@@ -65,7 +65,7 @@ class aosController(object):
 
         # Read the y2 file of specific instrument. y = A * x + A2 * x2 + w. y2 = A2 * x2
         # x2 is the uncontrolled perturbations.
-        # Check with Bo for why all values are zeros. How to handle the real condition?
+        # y2 file here is just a placeholder for the future update.
         y2FilePath = os.path.join(ctrlDir, instName, "y2*txt")
         self.y2File = glob(y2FilePath)[0]
         self.y2 = np.loadtxt(self.y2File)
@@ -84,7 +84,7 @@ class aosController(object):
 
         # Get the normalized rigid body weighting
         # For the rigid body DOF (r for rigid), weight based on the total stroke
-        # Need to check with Bo for the reason of normalization
+        # Do the normalization to remove the affection of unit
         rbW = self.rbStroke[0]/self.rbStroke
 
         # Construct the authority array (H)
@@ -99,7 +99,6 @@ class aosController(object):
         self.range = 1/authorityNoTrunc*self.rbStroke[0]
 
         # Decide to modify the sensitivity matrix A based on the strategy or not
-        # Check with Bo for this part
         # There should be "crude_opti" and "kalman" in aosEstimator.py strategy.
         if (esti.strategy == "pinv"):
             # Decide to normalize sensitivity matrix A or not
@@ -107,9 +106,12 @@ class aosController(object):
                 esti.normA(self.Authority)
         elif (esti.strategy == "opti"):
             # Decide to add a diagonal perpetubation term in sensitivity matrix A or not.
+            # This is try to solve the environment affection.
             if (esti.fmotion > 0):
                 esti.optiAinv(self.range, covM)
 
+        # For the optimal control algorithm, follow:
+        # https://confluence.lsstcorp.org/pages/viewpage.action?pageId=69403268
         if (self.strategy == "optiPSSN"):
 
             # Calculate the matrix H by diagonalize the array of authority in rms^2 unit
@@ -117,6 +119,7 @@ class aosController(object):
             self.mH = np.diag(self.Authority**2)
 
             # Update the matrix H for the strategy of "x0xcor"
+            # Check the strategy of "x0xcor" is needed or not with Bo. 
             if (self.xref == "x0xcor"):
 
                 # b3 of M1M3 bending, 10 is for the DOF of M2 and camera hexapod
@@ -126,7 +129,7 @@ class aosController(object):
                 idx2 = 10 + 20 + 5
 
                 # Update mH if M1M3 b3 and M2 b5 are both available
-                # Check with Bo for this idea
+                # Check with Bo for this idea. Do we need to keep this "x0xcor"?
                 if (esti.dofIdx[idx1] and esti.dofIdx[idx2]):
 
                     # Do not understand this part.
@@ -139,9 +142,11 @@ class aosController(object):
                     self.mH[idx1, idx2] = self.Authority[idx1] * self.Authority[idx2] * 100
 
             # Calcualte the CCmat by diagonalizing the PSSN with unit of um
-            # Do not understand the meaning of CCmat. Check with Bo for this.
+            # P = C * y = C * (A * x)
+            # P.T * P = (C * A * x).T * C * A * x = x.T * (A.T * C.T * C * A) * x = x.T * Q * x
+            # CCmat is C.T *C above
 
-            # wavelength below in um,b/c output of A in um
+            # Wavelength below in um,b/c output of A in um
             self.CCmat = np.diag(metr.pssnAlpha) * (2 * np.pi / effwave)**2
 
             # Calculate the matrix Q (q^2 = y.T * Q * y)
@@ -236,7 +241,7 @@ class aosController(object):
         data = data[:, dofIdx[int(startIdx):int(startIdx + targetSubIndexLen)]]
 
         # Calculate the element of matrix H (authority) of specific subsystem
-        # Check with Bo for the physical meaning of this
+        # Use the standard deviation of actuator force as an index to decide the authority.
         mH = np.std(data, axis=0)
 
         return mH
@@ -286,17 +291,17 @@ class aosController(object):
                         self.shiftGearThres = float(line.split()[2])
 
                 # M1M3 actuator penalty factor
-                # Not really understand the meaning of penalty here. Check with Bo.
+                # This is based the experience to give the penalty, which reflects to the authority.
                 elif (line.startswith("M1M3_actuator_penalty")):
                     self.rhoM13 = float(line.split()[1])
 
                 # M2 actuator penalty factor
-                # Not really understand the meaning of penalty here. Check with Bo.
+                # This is based the experience to give the penalty, which reflects to the authority.
                 elif (line.startswith("M2_actuator_penalty")):
                     self.rhoM2 = float(line.split()[1])
 
                 # Penalty on control motion as a whole
-                # Not really understand the meaning of penalty here. Check with Bo.
+                # This is based the experience to give the penalty, which reflects to the authority.
                 elif (line.startswith("Motion_penalty")):
                     self.rho = float(line.split()[1])
 
@@ -333,7 +338,10 @@ class aosController(object):
         # For the negative sign, follow:
         # https://confluence.lsstcorp.org/pages/viewpage.action?pageId=64698465
 
-        # Check with Bo for the reason to use "null"
+        # Do not consider the control strategy. Just use the calculated wavefront error and related 
+        # optical state in the basis of DOF to feedback to the telescope.
+        # Check eq.(5) in the paper of "Active optics in Large Synoptic Survey Telescope" by Ming el. 
+        # at 2012.
         if (self.strategy == "null"):
 
             # Calculate y2 = sum_i (w_i * y2f), which i is ith field point
@@ -356,6 +364,9 @@ class aosController(object):
             # Calculate uk
             uk[esti.dofIdx] = -gainUse * (esti.xhat[esti.dofIdx] + x_y2c)
 
+        # Consider the control strategy and use the PSSN as the performance matrix.
+        # Check the section 4.4 in the paper of "Real Time Wavefront Control System for the large
+        # Synoptic Survey Telescope (LSST)" by George el. at 2014
         elif (self.strategy == "optiPSSN"):
 
             # Construct the array x = inv(A) * y
@@ -368,7 +379,6 @@ class aosController(object):
                 Afield = senMfield[np.ix_(esti.zn3Idx, esti.dofIdx)]
 
                 # Get the avialble y2 values based on the available Zk index
-                # There should be a update of y2 before/ after this. Check with Bo for this.
                 y2f = self.y2[iField, esti.zn3Idx]
 
                 # Calculate y_{k+1} = A * x_{k} + y2_{k}
@@ -393,21 +403,25 @@ class aosController(object):
             # F = (A.T * Q * A + pho * H)^(-1)
             # x = A.T * Q * y_{k+1}. It is noted that the weighting is included in x for the simplification
 
-            # Check the idea of "0" and "x00" with Bo. It does not look like the description in
+            # For the strategy here, follow:
             # https://confluence.lsstcorp.org/pages/viewpage.action?pageId=60948764
+            
+            # The offset will only trace the previous one
             if self.xref in ("x0", "x0xcor"):
                 # uk = u_{k+1} = - gain * F * xhat_{k+1}
                 uk[esti.dofIdx] = -gainUse * self.mF.dot(Mx)
 
+            # The offset will trace the real value and target for 0
             elif (self.xref == "0"):
                 # uk = gain * F * ( -rho^2 * H * x_{k} - xhat_{k+1} )
                 uk[esti.dofIdx] = gainUse * self.mF.dot(-self.rho**2 * self.mH.dot(state.stateV[esti.dofIdx]) - Mx)
 
+            # It is noticed that there is no difference between "0" and "x00" at this moment. That means the state.stateV0 
+            # is just a place holder here and waits for the future update.
+
+            # The offset will only trace the relative changes of offset without regarding the real value
             elif (self.xref == "x00"):
                 # uk = gain * F * [ rho^2 * H * (x_{0} - x_{k}) - xhat_{k+1} ]
-                # Check this one with Bo. state.stateV0 is hard coded to use "iter0_pert.mat", which is zero actually.
-                # Based on this point, there is no different between "0" and "x00" here.
-                # A possibility is to put the initial V0 in iter0_pert.mat. But do not see that here.
                 uk[esti.dofIdx] = gainUse * self.mF.dot(
                             self.rho**2 * self.mH.dot(state.stateV0[esti.dofIdx] - state.stateV[esti.dofIdx]) - Mx)
 
