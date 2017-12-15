@@ -863,103 +863,157 @@ class aosTeleState(object):
                 
         fid.close()
 
-    def getOPDAll(self, obsID, opdoff, metr, numproc, znwcs,
-                  obscuration, debugLevel):
+    def getOPDAll(self, obsID, metr, numproc, znwcs, obscuration, opdoff=False, debugLevel=0):
+        """
+        
+        Get the optical path difference (OPD) by PhoSim. 
+        
+        Arguments:
+            obsID {[int]} -- Observation ID used in PhoSim.
+            metr {[aosMetric]} -- aosMetric object.
+            numproc {[int]} -- Number of processor for parallel calculation.
+            znwcs {[int]} -- Number of terms of annular Zk (z1-z22 by default).
+            obscuration {[float]} -- Obscuration of annular Zernike polynomial.
+        
+        Keyword Arguments:
+            opdoff {bool} -- Calculate OPD or not. (default: {False})
+            debugLevel {int} -- Debug level. The higher value gives more information. 
+                                (default: {0})
+        """
 
-        if not opdoff:
-            self.writeOPDinst(obsID, metr)
-            self.writeOPDcmd(metr)
-            argList = []
+        # The boundary of OPD image is dangerous for the calculation. Check with Bo.
+
+        # Calculate OPD by PhoSim if necessary
+        if (not opdoff):
+
+            # Write the OPD instrument file for PhoSim use
+            self.__writeOPDinst(obsID, metr)
+
+            # Write the OPD command file for PhoSim use
+            self.__writeOPDcmd(metr)
+            
+            # Source and destination file paths
+            srcFile = os.path.join(self.phosimDir, "output", "opd_%d.fits.gz" % obsID)
+            dstFile = os.path.join(self.imageDir, "iter%d" % self.iIter, 
+                                   "sim%d_iter%d_opd.fits.gz" % (self.iSim, self.iIter))
                     
-            srcFile = '%s/output/opd_%d.fits.gz' % (
-                self.phosimDir, obsID)
-            dstFile = '%s/iter%d/sim%d_iter%d_opd.fits.gz' % (
-                self.imageDir, self.iIter, self.iSim, self.iIter)
+            # Collect the arguments needed for PhoSim use
+            argList = []
+            argList.append((self.OPD_inst, self.OPD_cmd, self.inst, self.eimage, 
+                            self.OPD_log, self.phosimDir, self.zTrueFile, 
+                            metr.nFieldp4, znwcs, obscuration, self.opdx, self.opdy, 
+                            srcFile, dstFile, self.nOPDw, numproc, debugLevel))
 
-            argList.append((self.OPD_inst, self.OPD_cmd, self.inst,
-                                self.eimage, self.OPD_log,
-                                self.phosimDir,
-                                self.zTrueFile, metr.nFieldp4,
-                                znwcs, obscuration, self.opdx, self.opdy,
-                                srcFile, dstFile, self.nOPDw, numproc,
-                                debugLevel))
+            # Calculate the OPD by parallel calculation
             runOPD(argList[0])
             
-    def getOPDAllfromBase(self, baserun, metr):
-        if not os.path.isfile(self.OPD_inst):
-            baseFile = self.OPD_inst.replace(
-                 'sim%d' % self.iSim, 'sim%d' % baserun)
-            os.link(baseFile, self.OPD_inst)
+    def getOPDAllfromBase(self, baserun, nField):
+        """
+        
+        Hard link the optical path difference (OPD) related files to avoid the repeated calculation.
+        
+        Arguments:
+            baserun {[int]} -- Source simulation number (basement run).
+            nField {[int]} -- Number of field points on focal plane. It can be 31 or 35 (31 + 4 WFS points). 
+        """
 
-        if not os.path.isfile(self.OPD_log):
-            baseFile = self.OPD_log.replace(
-                 'sim%d' % self.iSim, 'sim%d' % baserun)
-            os.link(baseFile, self.OPD_log)
+        # File list to do the hard link
+        hardLinkFileList = [self.OPD_inst, self.OPD_log, self.zTrueFile, self.OPD_cmd]
 
-        if not os.path.isfile(self.zTrueFile):
-            baseFile = self.zTrueFile.replace(
-                'sim%d' % self.iSim, 'sim%d' % baserun)
-            os.link(baseFile, self.zTrueFile)
+        # Collect the file related to OPD
+        iterFolder = "iter%d" % self.iIter 
+        for ii in range(self.nOPDw):
+            for iField in range(nField):
 
-        for i in range(self.nOPDw):
-            for iField in range(metr.nFieldp4):
-                if self.nOPDw == 1:
-                    opdFile = '%s/iter%d/sim%d_iter%d_opd%d.fits' % (
-                        self.imageDir, self.iIter, self.iSim, self.iIter,
-                        iField)
+                if (self.nOPDw == 1):
+                    opdFile = os.path.join(self.imageDir, iterFolder, 
+                                           "sim%d_iter%d_opd%d.fits" % (self.iSim, self.iIter, iField))                    
                 else:
-                    opdFile = '%s/iter%d/sim%d_iter%d_opd%d_w%d.fits' % (
-                        self.imageDir, self.iIter, self.iSim, self.iIter,
-                        iField, i)
-                if not os.path.isfile(opdFile):
-                    baseFile = opdFile.replace(
-                        'sim%d' % self.iSim, 'sim%d' % baserun)
-                    os.link(baseFile, opdFile)
-                
-        if not os.path.isfile(self.OPD_cmd):
-            baseFile = self.OPD_cmd.replace(
-                'sim%d' % self.iSim, 'sim%d' % baserun)
-            os.link(baseFile, self.OPD_cmd)
+                    opdFile = os.path.join(self.imageDir, iterFolder, 
+                                    "sim%d_iter%d_opd%d_w%d.fits" % (self.iSim, self.iIter, iField, ii))                    
 
+                hardLinkFileList.append(opdFile)
 
-    def writeOPDinst(self, obsID, metr):
+        # Hard link the file to avoid the repeated calculation
+        for aFile in hardLinkFileList:
+            hardLinkFile(aFile, baserun, self.iSim)
 
-        fid = open(self.OPD_inst, 'w')
-        fid.write('Opsim_filter %d\n\
-Opsim_obshistid %d\n\
-SIM_VISTIME 15.0\n\
-SIM_NSNAP 1\n' % (phosimFilterID[self.band], obsID))
-        fpert = open(self.pertFile, 'r')
+    def __writeOPDinst(self, obsID, metr):
+        """
+        
+        Write the instrument file of optical path difference (OPD) used in PhoSim.
+        
+        Arguments:
+            obsID {[int]} -- Observation ID.
+            metr {[aosMetric]} -- aosMetric object.
+        """
+
+        # Open th file
+        fid = open(self.OPD_inst, "w")
+
+        # Write the intrument condition used for PhoSim
+        fid.write("Opsim_filter %d\n\
+                   Opsim_obshistid %d\n\
+                   SIM_VISTIME 15.0\n\
+                   SIM_NSNAP 1\n" % (phosimFilterID[self.band], obsID))
+
+        # Write the aggregated degree of freedom of telescope
+        fpert = open(self.pertFile, "r")
         fid.write(fpert.read())
+        fpert.close()
+
+        # Write the OPD information contains the related field X, Y
+        # The output of PhoSim simulation is the OPD image for inspected field points
         for irun in range(self.nOPDw):
-            for i in range(metr.nFieldp4):
-                if self.nOPDw == 1:
-                    fid.write('opd %2d\t%9.6f\t%9.6f %5.1f\n' % (
-                        i, metr.fieldX[i], metr.fieldY[i],
-                        self.effwave * 1e3))
-                else:
-                    fid.write('opd %2d\t%9.6f\t%9.6f %5.1f\n' % (
-                        irun * metr.nFieldp4 + i,
-                        metr.fieldX[i], metr.fieldY[i],
-                        self.GQwave[self.band][irun] * 1e3))
-        fid.close()
-        fpert.close()
+            # Need to update "metr.nFieldp4" here. This is bad and confusing.
+            for ii in range(metr.nFieldp4):
 
-    def writeOPDcmd(self, metr):
-        fid = open(self.OPD_cmd, 'w')
-        fid.write('backgroundmode 0\n\
-raydensity 0.0\n\
-perturbationmode 1\n')
-        fpert = open(self.pertCmdFile, 'r')
+                if (self.nOPDw == 1):
+                    opdWavelengthInNm = self.effwave*1e3
+                else:
+                    opdWavelengthInNm = self.GQwave[self.band][irun]*1e3
+
+                fid.write("opd %2d\t%9.6f\t%9.6f %5.1f\n" % (irun*metr.nFieldp4 + ii, metr.fieldX[ii], 
+                                                             metr.fieldY[ii], opdWavelengthInNm))
+
+        # Close the file
+        fid.close()
+
+    def __writeOPDcmd(self, metr):
+        """
+        
+        Write the command file of optical path difference (OPD) used in PhoSim.
+        
+        Arguments:
+            metr {[aosMetric]} -- aosMetric object.
+        """
+
+        # Open the file
+        fid = open(self.OPD_cmd, "w")
+  
+        # Write the command condition used for PhoSim
+        fid.write("backgroundmode 0\n\
+                   raydensity 0.0\n\
+                   perturbationmode 1\n")
+        
+        # Write the mirror surface print correction along the z-axis and camera lens distortion
+        fpert = open(self.pertCmdFile, "r")
         fid.write(fpert.read())
         fpert.close()
+
+        # Close the file
         fid.close()
 
-    def getPSFAll(self, obsID, psfoff, metr, numproc, debugLevel, pixelum=10):
+    def getPSFAll(self, obsID, metr, numproc, psfoff=False, pixelum=10, debugLevel=0):
 
-        if not psfoff:
-            self.writePSFinst(obsID, metr)
-            self.writePSFcmd(metr)
+        if (not psfoff):
+            
+            # Write the instrument file for PSF calculation used in PhoSim
+            self.__writePSFinst(obsID, metr)
+
+            # Write the command file for PSF calculation used in PhoSim
+            self.__writePSFcmd(metr)
+
             self.PSF_log = '%s/iter%d/sim%d_iter%d_psf%d.log' % (
                 self.imageDir, self.iIter, self.iSim, self.iIter, metr.nField)
 
@@ -1107,7 +1161,7 @@ perturbationmode 1\n')
             baseFile = pngFile.replace('sim%d' % self.iSim, 'sim%d' % baserun)
             os.link(baseFile, pngFile)
 
-    def writePSFinst(self, obsID, metr):
+    def __writePSFinst(self, obsID, metr):
         self.PSF_inst = '%s/iter%d/sim%d_iter%d_psf%d.inst' % (
             self.pertDir, self.iIter, self.iSim, self.iIter, metr.nField)
         fid = open(self.PSF_inst, 'w')
@@ -1128,7 +1182,7 @@ SIM_CAMCONFIG 1\n' % (phosimFilterID[self.band], obsID,
         fid.close()
         fpert.close()
 
-    def writePSFcmd(self, metr):
+    def __writePSFcmd(self, metr):
         self.PSF_cmd = '%s/iter%d/sim%d_iter%d_psf%d.cmd' % (
             self.pertDir, self.iIter, self.iSim, self.iIter, metr.nField)
         fid = open(self.PSF_cmd, 'w')

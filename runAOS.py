@@ -38,7 +38,7 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
         cwfsModel {[str]} -- Optical model. (default: {"offAxis"})
     """
 
-    global state, M1M3, M2, ctrl
+    global state, M1M3, M2, ctrl, args, wfs, metr
 
     # Instantiate the parser for command line to use
     parser = __setParseAugs()
@@ -180,7 +180,13 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
 
         # Do the metrology calculation
         if (args.baserun > 0 and iIter == 0):
-            state.getOPDAllfromBase(args.baserun, metr)
+
+            # Consider the 35 field points (contains WFS) instead of 31 in "LSST". 
+            # This is why to use metr.nFieldp4 instead of metr.nField
+            # It is noticed that there is no difference between metr.nField and metr.nField4 in "ComCam".
+            # Need to redesign this part.
+            state.getOPDAllfromBase(args.baserun, metr.nFieldp4)
+            
             state.getPSFAllfromBase(args.baserun, metr)
             metr.getPSSNandMorefromBase(args.baserun, state)
             metr.getEllipticityfromBase(args.baserun, state)
@@ -189,9 +195,13 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
                 wfs.getZ4CfromBase(args.baserun, state.iSim)
 
         else:
-            state.getOPDAll(obsID, args.opdoff, metr, args.numproc, wfs.znwcs, wfs.inst.obscuration,
-                            args.debugLevel)
-            state.getPSFAll(obsID, args.psfoff, metr, args.numproc, args.debugLevel)
+            # Calculate the optical path difference (OPD) by PhoSim
+            state.getOPDAll(obsID, metr, args.numproc, wfs.znwcs, wfs.inst.obscuration, 
+                            opdoff=args.opdoff, debugLevel=args.debugLevel)
+
+            # Calculate the point spread function (PSF) by PhoSim
+            state.getPSFAll(obsID, metr, args.numproc, psfoff=args.psfoff, debugLevel=args.debugLevel)
+
             metr.getPSSNandMore(args.pssnoff, state, args.numproc, args.debugLevel)
             metr.getEllipticity(args.ellioff, state, args.numproc, args.debugLevel)
 
