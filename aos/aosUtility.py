@@ -1,4 +1,4 @@
-import os, re
+import os, re, subprocess
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -732,13 +732,77 @@ def hardLinkFile(targetFilePath, sourceNum, targetNum):
         targetNum {[int]} -- Target simulation number.
     """
 
-    if not os.path.isfile(targetFilePath):
+    if (not os.path.isfile(targetFilePath)):
 
         # Get the path of base run file by changing the simulation number
         sourceFilePath = targetFilePath.replace("sim%d" % targetNum, "sim%d" % sourceNum)
 
         # Construct a hard link
         os.link(sourceFilePath, targetFilePath)
+
+def runProgram(command, binDir=None, argstring=None):
+    """
+    
+    Run the program w/o arguments.
+    
+    Arguments:
+        command {[string]} -- Command of application.
+    
+    Keyword Arguments:
+        binDir {[str]} -- Directory of binary application. (default: {None})
+        argstring {[str]} -- Arguments of program. (default: {None})
+    
+    Raises:
+        RuntimeError -- There is the error in running the program.
+    """
+
+    # Directory of binary application
+    if (binDir is not None):
+        command = os.path.join(binDir, command)
+
+    # Arguments for the program
+    if (argstring is not None):
+        command += (" " + argstring)
+
+    # Call the program w/o arguments
+    if (subprocess.call(command, shell=True) != 0):
+        raise RuntimeError("Error running: %s" % command)
+
+def writeToFile(filePath, content=None, sourceFile=None, mode="a"):
+    """
+    
+    Write the file based on the content to put or the source file to copy with.
+    
+    Arguments:
+        filePath {[str]} -- File path to write.
+    
+    Keyword Arguments:
+        content {[str]} -- Content to write into the file. (default: {None})
+        sourceFile {[str]} -- Source file to write its content into the file. (default: {None})
+        mode {[str]} -- Overwrite ("w") or append ("a") the file. (default: {"a"})
+    """
+
+    if mode not in ("w", "a"):
+        raise ValueError("Mode: %s is not supported." % mode)
+
+    if (content is not None) or (sourceFile is not None):
+
+        # Open the file. If the file path does not exist, the new file will be generated.
+        # Use the append instead of 
+        fid = open(filePath, mode)
+
+        # Write the content into the file
+        if (content is not None):
+            fid.write(content)
+
+        # Write the content of source file into the file
+        if (sourceFile is not None):
+            fSrc = open(sourceFile, "r")
+            fid.write(fSrc.read())
+            fSrc.close()
+
+        # Close the file
+        fid.close()
 
 if __name__ == "__main__":
 

@@ -38,7 +38,7 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
         cwfsModel {[str]} -- Optical model. (default: {"offAxis"})
     """
 
-    global state, M1M3, M2, ctrl, args, wfs, metr
+    # global state, M1M3, M2, ctrl, args, wfs, metr
 
     # Instantiate the parser for command line to use
     parser = __setParseAugs()
@@ -53,7 +53,6 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
         args.sensor = "pass"
         args.ctrloff = True
         args.opdoff = True
-        args.psfoff = True
         args.pssnoff = True
         args.ellioff = True
 
@@ -123,7 +122,7 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
                          M1M3.force, M2.force, effwave, args.gain, covM=wfs.covM, 
                          debugLevel=args.debugLevel)
 
-    sys.exit()
+    # sys.exit()
 
     # *****************************************
     # start the Loop
@@ -187,7 +186,9 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
             # Need to redesign this part.
             state.getOPDAllfromBase(args.baserun, metr.nFieldp4)
             
-            state.getPSFAllfromBase(args.baserun, metr)
+            # Check I need this or not for PSF related calcualtion with Bo
+            # state.getPSFAllfromBase(args.baserun, metr)
+
             metr.getPSSNandMorefromBase(args.baserun, state)
             metr.getEllipticityfromBase(args.baserun, state)
 
@@ -198,9 +199,6 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
             # Calculate the optical path difference (OPD) by PhoSim
             state.getOPDAll(obsID, metr, args.numproc, wfs.znwcs, wfs.inst.obscuration, 
                             opdoff=args.opdoff, debugLevel=args.debugLevel)
-
-            # Calculate the point spread function (PSF) by PhoSim
-            state.getPSFAll(obsID, metr, args.numproc, psfoff=args.psfoff, debugLevel=args.debugLevel)
 
             metr.getPSSNandMore(args.pssnoff, state, args.numproc, args.debugLevel)
             metr.getEllipticity(args.ellioff, state, args.numproc, args.debugLevel)
@@ -290,10 +288,6 @@ def __setParseAugs():
     # Regenerate the OPD map or not
     helpDescript = "w/o regenerating OPD maps"
     parser.add_argument("-opdoff", help=helpDescript, action="store_true")
-
-    # Regenerate the PSF image or not
-    helpDescript = "w/o regenerating psf images"
-    parser.add_argument("-psfoff", help=helpDescript, action="store_true")
 
     # Calculate the PSSN or not
     helpDescript = "w/o calculating PSSN"
