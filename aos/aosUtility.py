@@ -804,6 +804,142 @@ def writeToFile(filePath, content=None, sourceFile=None, mode="a"):
         # Close the file
         fid.close()
 
+def fieldXY2ChipFocalPlane(focalPlanePath, fieldX, fieldY, debugLevel=0):
+    """
+    
+    Transform the field x, y to pixel x, y on the chip belong to a certain focal plane.
+    
+    Arguments:
+        focalPlanePath {[str]} -- Path of focal plane layout data.
+        fieldX {[field]} -- Field x.
+        fieldY {[field]} -- Field y.
+    
+    Keyword Arguments:
+        debugLevel {int} -- Debug level. The higher value gives more information.
+                            (default: {0})
+
+    Returns:
+        [str] -- Chip Name.
+        [int] -- Pixel position x.
+        [int] -- Pixel position y.
+    """
+
+    # Get the chip boundary
+    ruler = getChipBoundary(focalPlanePath)
+
+    # Show the condition of ruler
+    if (debugLevel >= 3):
+        print("ruler:\n")
+        print(ruler)
+        print(len(ruler))
+
+    # Get the raft (r), chip (c), and pixel (p)
+    # It is noticed that the dimension of CCD has been hard-coded here. Check with Bo.
+    rx, cx, px = fieldAgainstRuler(ruler, fieldX, 4000)
+    ry, cy, py = fieldAgainstRuler(ruler, fieldY, 4072)
+
+    # Get the chip name
+    chipName = "R%d%d_S%d%d" % (rx, ry, cx, cy)
+
+    return chipName, px, py
+
+def getChipBoundary(fplayoutFile):
+    """
+    
+    Get the chip boundary along x direction in um.
+    
+    Arguments:
+        fplayoutFile {[str]} -- Path of focal plane layout data.
+    
+    Returns:
+        [ndarray] -- Chip boundary along x direction.
+    """
+
+    # Get the chip and its center coordinate x, y in the unit of um
+    mydict = {}
+    f = open(fplayoutFile)
+
+    for line in f:
+        line = line.strip()
+        if (line.startswith("R")):
+            mydict[line.split()[0]] = [float(line.split()[1]),
+                                       float(line.split()[2])]
+
+    f.close()
+    
+    # Get the ruler
+    ruler = sorted(set([x[0] for x in mydict.values()]))
+
+    # Change to numpy array
+    ruler = np.array(ruler)
+
+    return ruler
+
+def fieldAgainstRuler(ruler, field, chipPixel):
+    """
+    
+    Get the raft, chip, and pixel position along a certain axis based on the chip pixel.
+    
+    Arguments:
+        ruler {[ndarray]} -- Chip boundary along x direction.
+        field {[float]} -- Field position in degree.
+        chipPixel {[int]} -- Length of pixel along a certain direction (x or y).
+    
+    Returns:
+        [int] -- Raft.
+        [int] -- Chip.
+        [int] -- Pixel position.
+    """
+
+    # Change the unit from degree to micron    
+    field = field*180000  # degree to micron
+
+    # Find the chip for this field position
+    p2 = (ruler >= field)
+
+    # Too large to be in range
+    if (np.count_nonzero(p2) == 0):
+        # p starts from 0
+        p = len(ruler) - 1
+
+    # Too small to be in range
+    elif (p2[0]):
+        p = 0
+
+    # Field position is in the range
+    else:
+
+        # Lower bound
+        p1 = p2.argmax() - 1
+
+        # Upper bound
+        p2 = p2.argmax()
+
+        # Check the field position is in the left (p1) or right (p2) chip
+        if (ruler[p2] - field) < (field - ruler[p1]):
+            p = p2
+        else:
+            p = p1
+
+    # Change the unit from um to pixel
+    # 1 pixel = 10 um
+    pixel = (field - ruler[p])/10
+
+    # This is because the chip boundary is recorded based on the center
+    pixel += chipPixel/2
+
+    # Raft 
+    raft = np.floor(p / 3)
+
+    # Chip
+    chip = p % 3
+
+    # Pixel
+    pixelPos = int(pixel)
+
+    return raft, chip, pixelPos
+
+
 if __name__ == "__main__":
 
     uk = np.arange(50)

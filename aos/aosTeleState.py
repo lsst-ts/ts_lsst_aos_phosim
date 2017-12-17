@@ -18,7 +18,7 @@ from scipy.interpolate import Rbf
 
 from lsst.cwfs.tools import ZernikeAnnularFit, ZernikeFit, ZernikeEval, extractArray
 
-from aos.aosUtility import getInstName, isNumber, getLUTforce, hardLinkFile, runProgram, writeToFile
+from aos.aosUtility import getInstName, isNumber, getLUTforce, hardLinkFile, runProgram, writeToFile, fieldXY2ChipFocalPlane
 
 import matplotlib.pyplot as plt
 
@@ -29,6 +29,7 @@ class aosTeleState(object):
 
     # Instrument name
     LSST = "lsst"
+    ComCam = "comcam"
 
     # Effective wavelength
     effwave = {"u": 0.365, "g": 0.480, "r": 0.622,
@@ -102,6 +103,8 @@ class aosTeleState(object):
 
         # Get the instrument name
         self.inst = getInstName(inst)[0]
+        if self.inst not in (self.LSST, self.ComCam):
+            raise ValueError("No %s instrument available." % inst)
 
         # Path to the simulation parameter data
         self.instruFile = os.path.join(simuParamDataDir, (simuParamFileName + ".inst"))
@@ -799,20 +802,20 @@ class aosTeleState(object):
         """
 
         # Write the perturbation file (aggregated degree of freedom of telescope)
-        fid = open(self.pertFile, "w")
+        content = ""
         for ii in range(ndofA):
-            if (self.stateV[ii] != 0):
-                # Don't add comments after each move command,
-                # Phosim merges all move commands into one!
-                fid.write("move %d %7.4f \n" % (self.phosimActuatorID[ii], self.stateV[ii]))
+            # if (self.stateV[ii] != 0):
+            # Don't add comments after each move command,
+            # Phosim merges all move commands into one!
+            content += "move %d %7.4f \n" % (self.phosimActuatorID[ii], self.stateV[ii]) 
 
-        fid.close()
+        writeToFile(self.pertFile, content=content, mode="w")
 
         # Save the state of telescope into the perturbation matrix
         np.savetxt(self.pertMatFile, self.stateV)
 
         # Write the perturbation command file
-        fid = open(self.pertCmdFile, "w")
+        content = ""
 
         # M1M3 surface print
         if (self.M1M3surf is not None):
@@ -828,17 +831,17 @@ class aosTeleState(object):
             # Check with Bo.
             zz = np.loadtxt(self.M1M3zlist)
             for ii in range(self.znPert):
-                fid.write("izernike 0 %d %s\n" % (ii, zz[ii]*1e-3))
+                content += "izernike 0 %d %s\n" % (ii, zz[ii]*1e-3) 
             for ii in range(self.znPert):
-                fid.write("izernike 2 %d %s\n" % (ii, zz[ii]*1e-3))
+                content += "izernike 2 %d %s\n" % (ii, zz[ii]*1e-3)
 
-            fid.write("surfacemap 0 %s 1\n" % os.path.abspath(self.resFile1))
-            fid.write("surfacemap 2 %s 1\n" % os.path.abspath(self.resFile3))
+            content += "surfacemap 0 %s 1\n" % os.path.abspath(self.resFile1)
+            content += "surfacemap 2 %s 1\n" % os.path.abspath(self.resFile3)
 
             # The meaning of surfacelink? Do not find it in:
             # https://bitbucket.org/phosim/phosim_release/wiki/Physics%20Commands
             # Check this with Bo
-            fid.write("surfacelink 2 0\n")
+            content += "surfacelink 2 0\n"
 
         # M2 surface print
         if (self.M2surf is not None):
@@ -847,22 +850,22 @@ class aosTeleState(object):
                         self.M2zlist, self.resFile2, self.surfaceGridN)
             zz = np.loadtxt(self.M2zlist)
             for ii in range(self.znPert):
-                fid.write("izernike 1 %d %s\n" % (ii, zz[ii]*1e-3))
+                content += "izernike 1 %d %s\n" % (ii, zz[ii]*1e-3) 
 
-            fid.write("surfacemap 1 %s 1\n" % os.path.abspath(self.resFile2))
+            content += "surfacemap 1 %s 1\n" % os.path.abspath(self.resFile2)
 
         # Camera lens correction in Zk. ComCam has no such data now.
         if (self.camRot is not None) and (self.inst == self.LSST):
             for ii in range(self.znPert):
                 # Andy uses mm, same unit as Zemax
-                fid.write("izernike 3 %d %s\n" % (ii, self.L1S1zer[ii]))
-                fid.write("izernike 4 %d %s\n" % (ii, self.L1S2zer[ii]))
-                fid.write("izernike 5 %d %s\n" % (ii, self.L2S1zer[ii]))
-                fid.write("izernike 6 %d %s\n" % (ii, self.L2S2zer[ii]))
-                fid.write("izernike 9 %d %s\n" % (ii, self.L3S1zer[ii]))
-                fid.write("izernike 10 %d %s\n" % (ii, self.L3S2zer[ii]))
+                content += "izernike 3 %d %s\n" % (ii, self.L1S1zer[ii])
+                content += "izernike 4 %d %s\n" % (ii, self.L1S2zer[ii])
+                content += "izernike 5 %d %s\n" % (ii, self.L2S1zer[ii])
+                content += "izernike 6 %d %s\n" % (ii, self.L2S2zer[ii])
+                content += "izernike 9 %d %s\n" % (ii, self.L3S1zer[ii])
+                content += "izernike 10 %d %s\n" % (ii, self.L3S2zer[ii]) 
 
-        fid.close()
+        writeToFile(self.pertCmdFile, content=content, mode="w")
 
     def getOPDAll(self, obsID, metr, numproc, znwcs, obscuration, opdoff=False, debugLevel=0):
         """
@@ -891,7 +894,7 @@ class aosTeleState(object):
             self.__writeOPDinst(obsID, metr)
 
             # Write the OPD command file for PhoSim use
-            self.__writeOPDcmd(metr)
+            self.__writeOPDcmd()
 
             # Source and destination file paths
             srcFile = os.path.join(self.phosimDir, "output", "opd_%d.fits.gz" % obsID)
@@ -905,7 +908,7 @@ class aosTeleState(object):
                             metr.nFieldp4, znwcs, obscuration, self.opdx, self.opdy,
                             srcFile, dstFile, self.nOPDw, numproc, debugLevel))
 
-            # Calculate the OPD by parallel calculation
+            # Calculate the OPD by parallel calculation and move the figures
             runOPD(argList[0])
 
     def getOPDAllfromBase(self, baserun, nField):
@@ -977,13 +980,10 @@ class aosTeleState(object):
         # Append the file content
         writeToFile(self.OPD_inst, content=content, mode="a")
 
-    def __writeOPDcmd(self, metr):
+    def __writeOPDcmd(self):
         """
 
         Write the command file of optical path difference (OPD) used in PhoSim.
-
-        Arguments:
-            metr {[aosMetric]} -- aosMetric object.
         """
 
         # Command condition used for PhoSim
@@ -995,194 +995,224 @@ class aosTeleState(object):
         # Write the mirror surface print correction along the z-axis and camera lens distortion
         writeToFile(self.OPD_cmd, content=content, sourceFile=self.pertCmdFile, mode="w")
 
-    def getWFSAll(self, obsID, timeIter, wfs, metr, numproc, debugLevel):
+    def getWFSAll(self, obsID, timeIter, wfs, metr, numproc, debugLevel=0):
 
+        # Write the WFS instrument file for PhoSim use
         self.__writeWFSinst(obsID, timeIter, wfs, metr)
-        self.__writeWFScmd(wfs)
+
+        # Write the WFS command file for PhoSim use
+        self.__writeWFScmd()
+
+        # Collect the arguments needed for PhoSim use
         argList = []
         for irun in range(wfs.nRun):
-            argList.append((self.WFS_inst[irun], self.WFS_cmd, self.inst,
-                                self.eimage, self.WFS_log[irun],
-                                self.phosimDir, numproc, debugLevel))
-        # test, pdb cannot go into the subprocess
-        # runWFS1side(argList[0])
+            argList.append((self.WFS_inst[irun], self.WFS_cmd, self.inst, self.eimage, 
+                            self.WFS_log[irun], self.phosimDir, numproc, debugLevel))
 
+        # Calculate the WFS by parallel calculation
         pool = multiprocessing.Pool(numproc)
         pool.map(runWFS1side, argList)
         pool.close()
         pool.join()
 
-        plt.figure(figsize=(10, 5))
+        # Calculate the OPD by parallel calculation and move the figures
+
         for i in range(metr.nFieldp4 - wfs.nWFS, metr.nFieldp4):
-            chipStr, px, py = self.fieldXY2Chip(
-                metr.fieldXp[i], metr.fieldYp[i], debugLevel)
-            if wfs.nRun == 1: # phosim generates C0 & C1 already
+
+            chipStr, px, py = self.fieldXY2Chip(metr.fieldXp[i], metr.fieldYp[i], debugLevel=debugLevel)
+
+            if (wfs.nRun == 1): # phosim generates C0 & C1 already
+
                 for ioffset in [0, 1]:
                     for iexp in [0, 1]:
                         src = glob.glob('%s/output/*%s_f%d_%s*%s*E00%d.fit*' %
-                                    (self.phosimDir, obsID,
-                                        phosimFilterID[self.band],
+                                    (self.phosimDir, obsID, phosimFilterID[self.band],
                                     chipStr, wfs.halfChip[ioffset], iexp))
                         if '.gz' in src[0]:
                             runProgram('gunzip -f %s' % src[0])
                         elif 'gz' in src[-1]:
                             runProgram('gunzip -f %s' % src[-1])
                         chipFile = src[0].replace('.gz', '')
-                        runProgram('mv -f %s %s/iter%d' %
-                                (chipFile, self.imageDir, self.iIter))
+                        runProgram('mv -f %s %s/iter%d' % (chipFile, self.imageDir, self.iIter))
+
             else: # need to pick up two sets of fits.gz with diff phosim ID
+
                 for ioffset in [0, 1]:
                     src = glob.glob('%s/output/*%s_f%d_%s*E000.fit*' %
-                                    (self.phosimDir, obsID + ioffset,
-                                        phosimFilterID[self.band],
-                                    chipStr))
+                                    (self.phosimDir, obsID + ioffset, phosimFilterID[self.band], 
+                                     chipStr))
                     if '.gz' in src[0]:
                         runProgram('gunzip -f %s' % src[0])
                     elif 'gz' in src[-1]:
                         runProgram('gunzip -f %s' % src[-1])
+                    
                     chipFile = src[0].replace('.gz', '')
-                    targetFile = os.path.split(chipFile.replace(
-                        'E000', '%s_E000' % wfs.halfChip[ioffset]))[1]
-                    runProgram('mv -f %s %s/iter%d/%s' %
-                            (chipFile, self.imageDir, self.iIter,
-                                targetFile))
+                    targetFile = os.path.split(chipFile.replace('E000', '%s_E000' % wfs.halfChip[ioffset]))[1]
+                    runProgram('mv -f %s %s/iter%d/%s' % (chipFile, self.imageDir, self.iIter, targetFile))
 
     def __writeWFSinst(self, obsID, timeIter, wfs, metr):
+        """
+        
+        Write the instrument file of wavefront sensor (WFS) used in PhoSim.
+        
+        Arguments:
+            obsID {[int]} -- Observation ID.
+            timeIter {[Time]} -- Iteration time.
+            wfs {[aosWFS]} -- aosWFS object.
+            metr {[aosMetric]} -- aosMetric object.
+        """
+
         for irun in range(wfs.nRun):
-            fid = open(self.WFS_inst[irun], 'w')
-            fid.write('Opsim_filter %d\n\
-Opsim_obshistid %d\n\
-mjd %.10f\n\
-SIM_VISTIME 33.0\n\
-SIM_NSNAP 2\n\
-SIM_SEED %d\n\
-Opsim_rawseeing -1\n' % (phosimFilterID[self.band],
-                             obsID + irun, timeIter.mjd,
-                             obsID % 10000 + 4))
-            fpert = open(self.pertFile, 'r')
-            hasCamPiston = False #pertFile already includes move 10
-            for line in fpert:
-                if wfs.nRun > 1 and line.split()[:2] == ['move', '10']:
-                    # move command follow Zemax coordinate system.
-                    fid.write('move 10 %9.4f\n' %
-                            (float(line.split()[2]) - wfs.offset[irun] * 1e3))
-                    hasCamPiston = True
-                else:
-                    fid.write(line)
-            if wfs.nRun > 1 and (not hasCamPiston):
-                fid.write('move 10 %9.4f\n' % (-wfs.offset[irun] * 1e3))
 
-            fpert.close()
+            # Intrument condition used for PhoSim
+            content = ""
+            content += "Opsim_filter %d\n" % phosimFilterID[self.band]
+            content += "Opsim_obshistid %d\n" % (obsID+irun)
+            content += "mjd %.10f\n" % timeIter.mjd
+            content += "SIM_VISTIME 33.0\n"
+            content += "SIM_NSNAP 2\n"
+            content += "SIM_SEED %d\n" % (obsID % 10000 + 4)
+            content += "Opsim_rawseeing -1\n"
 
-            if self.inst[:4] == 'lsst':
-                fid.write('SIM_CAMCONFIG 2\n')
-            elif self.inst[:6] == 'comcam':
-                fid.write('SIM_CAMCONFIG 1\n')
+            # Write the condition into the file
+            writeToFile(self.WFS_inst[irun], content=content, mode="w")
 
-            ii = 0
-            for i in range(metr.nFieldp4 - wfs.nWFS, metr.nFieldp4):
-                if self.inst[:4] == 'lsst':
-                    if i % 2 == 1:  # field 31, 33, R44 and R00
-                        fid.write('object %2d\t%9.6f\t%9.6f %9.6f \
-../sky/%s 0.0 0.0 0.0 0.0 0.0 0.0 star 0.0  none  none\n' % (
-                            ii, metr.fieldXp[i] + 0.020, metr.fieldYp[i],
-                            self.cwfsMag, self.sedfile))
-                        ii += 1
-                        fid.write('object %2d\t%9.6f\t%9.6f %9.6f \
-../sky/%s 0.0 0.0 0.0 0.0 0.0 0.0 star 0.0  none  none\n' % (
-                            ii, metr.fieldXp[i] - 0.020, metr.fieldYp[i],
-                            self.cwfsMag, self.sedfile))
-                        ii += 1
+            # When writing the pertubration condition, need to differentiate the "lsst" and "comcam"
+            # For the comcam, the intra- and extra-focal images are gotten by the camera piston motion
+            if (self.inst == self.LSST):
+                writeToFile(self.WFS_inst[irun], sourceFile=self.pertFile, mode="a")
+
+            elif (self.inst == self.ComCam):
+                # Open the perturbation file and update the camera piston position
+                fid = open(self.WFS_inst[irun], "a")
+                fpert = open(self.pertFile, "r")
+
+                for line in fpert:
+                    if (line.split()[:2] == ["move", "10"]):
+                        # Add the piston offset which is used to get the defocal images 
+                        fid.write("move 10 %9.4f\n" % (float(line.split()[2]) - wfs.offset[irun]*1e3))
                     else:
-                        fid.write('object %2d\t%9.6f\t%9.6f %9.6f \
-../sky/%s 0.0 0.0 0.0 0.0 0.0 0.0 star 0.0  none  none\n' % (
-                            ii, metr.fieldXp[i], metr.fieldYp[i] + 0.020,
-                            self.cwfsMag, self.sedfile))
+                        fid.write(line)
+                
+                fpert.close()
+                fid.close()
+
+            # Set the comera configuration and write into the file
+            if (self.inst == self.LSST):
+                content = "SIM_CAMCONFIG 2\n"
+            elif (self.inst == self.ComCam):
+                content = "SIM_CAMCONFIG 1\n"
+
+            writeToFile(self.WFS_inst[irun], content=content, mode="a")
+
+            # Write the star information into the file
+            content = ""
+            ii = 0
+            for jj in range(metr.nFieldp4 - wfs.nWFS, metr.nFieldp4):
+
+                # Add the field offset (position of donut) for LSST condition
+                fieldOffset = 0.020
+                if (self.inst == self.LSST):
+
+                    # Field 31, 33, R44_S00 and R00_S22
+                    if (jj % 2 == 1):
+
+                        content += self.__writeStarDisc(ii, metr.fieldXp[jj] + fieldOffset, 
+                                                        metr.fieldYp[jj], self.cwfsMag, self.sedfile)
                         ii += 1
-                        fid.write('object %2d\t%9.6f\t%9.6f %9.6f \
-../sky/%s 0.0 0.0 0.0 0.0 0.0 0.0 star 0.0  none  none\n' % (
-                            ii, metr.fieldXp[i], metr.fieldYp[i] - 0.020,
-                            self.cwfsMag, self.sedfile))
+                        
+                        content += self.__writeStarDisc(ii, metr.fieldXp[jj] - fieldOffset, 
+                                                        metr.fieldYp[jj], self.cwfsMag, self.sedfile)
                         ii += 1
-                elif self.inst[:6] == 'comcam':
-                    fid.write('object %2d\t%9.6f\t%9.6f %9.6f \
-../sky/%s 0.0 0.0 0.0 0.0 0.0 0.0 star 0.0  none  none\n' % (
-                        ii, metr.fieldXp[i], metr.fieldYp[i],
-                        self.cwfsMag, self.sedfile))
+                    
+                    # R04_S20 and R40_S02
+                    else:
+                        content += self.__writeStarDisc(ii, metr.fieldXp[jj], metr.fieldYp[jj] + fieldOffset, 
+                                                        self.cwfsMag, self.sedfile)
+                        ii += 1
+
+                        content += self.__writeStarDisc(ii, metr.fieldXp[jj], metr.fieldYp[jj] - fieldOffset, 
+                                                        self.cwfsMag, self.sedfile)                   
+                        ii += 1
+                
+                elif (self.inst == self.ComCam):
+                    content += self.__writeStarDisc(ii, metr.fieldXp[jj], metr.fieldYp[jj], 
+                                                    self.cwfsMag, self.sedfile)
                     ii += 1
-            fid.close()
-            fpert.close()
 
-    def __writeWFScmd(self, wfs):
-        fid = open(self.WFS_cmd, 'w')
-        fid.write('backgroundmode 0\n\
-raydensity 0.0\n\
-perturbationmode 1\n\
-trackingmode 0\n\
-cleartracking\n\
-clearclouds\n\
-lascatprob 0.0\n\
-contaminationmode 0\n\
-diffractionmode 1\n\
-straylight 0\n\
-detectormode 0\n')
-# airrefraction 0\n\
-# coatingmode 0\n\ #this clears filter coating too
-        fpert = open(self.pertCmdFile, 'r')
-        fid.write(fpert.read())
-        fpert.close()
-        fid.close()
+            writeToFile(self.WFS_inst[irun], content=content, mode="a")
 
-    def fieldXY2Chip(self, fieldX, fieldY, debugLevel):
-        ruler = getChipBoundary(
-            '%s/data/lsst/focalplanelayout.txt' % (self.phosimDir))
+    def __writeStarDisc(self, objId, fieldX, fieldY, mag, sedfile):
+        """
+        
+        Star object information used in the instrument file for PhoSim.
+        
+        Arguments:
+            objId {[int]} -- Star object Id.
+            fieldX {[float]} -- Star field X.
+            fieldY {[float]} -- Star field Y.
+            mag {[float]} -- Star magnitude.
+            sedfile {[str]} -- SED file name.
+        
+        Returns:
+            [str] -- Star object information.
+        """
 
-        # r for raft, c for chip, p for pixel
-        rx, cx, px = fieldAgainstRuler(ruler, fieldX, 4000)
-        ry, cy, py = fieldAgainstRuler(ruler, fieldY, 4072)
+        # Discription of star object used in PhoSim
+        disc = "object %2d\t%9.6f\t%9.6f %9.6f ../sky/%s 0.0 0.0 0.0 0.0 0.0 0.0 star 0.0  none  none\n" % (
+                objId, fieldX, fieldY, mag, sedfile)
 
-        if debugLevel >= 3:
-            print('ruler:\n')
-            print(ruler)
-            print(len(ruler))
+        return disc
 
-        return 'R%d%d_S%d%d' % (rx, ry, cx, cy), px, py
+    def __writeWFScmd(self):
+        """
+        
+        Write the command file of wavefront sensor (WFS) used in PhoSim.
+        """
 
-def getChipBoundary(fplayoutFile):
+        # Command condition used for PhoSim
+        content = ""
+        content += "backgroundmode 0\n"
+        content += "raydensity 0.0\n"
+        content += "perturbationmode 1\n"
+        content += "trackingmode 0\n"
+        content += "cleartracking\n"
+        content += "clearclouds\n"
+        content += "lascatprob 0.0\n"
+        content += "contaminationmode 0\n"
+        content += "diffractionmode 1\n"
+        content += "straylight 0\n"
+        content += "detectormode 0\n"
 
-    mydict = dict()
-    f = open(fplayoutFile)
-    for line in f:
-        line = line.strip()
-        if (line.startswith('R')):
-            mydict[line.split()[0]] = [float(line.split()[1]),
-                                       float(line.split()[2])]
+        # Write the command and perturbation to PhoSim into the file
+        writeToFile(self.WFS_cmd, content=content, sourceFile=self.pertCmdFile, mode="w")
 
-    f.close()
-    ruler = sorted(set([x[0] for x in mydict.values()]))
-    return ruler
+    def fieldXY2Chip(self, fieldX, fieldY, debugLevel=0):
+        """
+        
+        Transform the field x, y to pixel x, y on the chip.
+        
+        Arguments:
+            fieldX {[field]} -- Field x.
+            fieldY {[field]} -- Field y.
+        
+        Keyword Arguments:
+            debugLevel {int} -- Debug level. The higher value gives more information.
+                                (default: {0})
+        
+        Returns:
+            [str] -- Chip Name.
+            [int] -- Pixel position x.
+            [int] -- Pixel position y.
+        """
 
+        # Focal plane layout file path
+        # It is noticed that the layout data here is to use the LSST camera. 
+        # Need to check the ComCam condition. Check with Bo. 
+        # There should be two conditions (LSST and ComCam) at least.
+        focalPlanePath = os.path.join(self.phosimDir, "data", "lsst", "focalplanelayout.txt")
 
-def fieldAgainstRuler(ruler, field, chipPixel):
-
-    field = field * 180000  # degree to micron
-    p2 = (ruler >= field)
-    if (np.count_nonzero(p2) == 0):  # too large to be in range
-        p = len(ruler) - 1  # p starts from 0
-    elif (p2[0]):
-        p = 0
-    else:
-        p1 = p2.argmax() - 1
-        p2 = p2.argmax()
-        if (ruler[p2] - field) < (field - ruler[p1]):
-            p = p2
-        else:
-            p = p1
-
-    pixel = (field - ruler[p]) / 10  # 10 for 10micron pixels
-    pixel += chipPixel / 2
-
-    return np.floor(p / 3), p % 3, int(pixel)
+        return fieldXY2ChipFocalPlane(focalPlanePath, fieldX, fieldY, debugLevel=debugLevel)
 
 def runOPD(argList):
     OPD_inst = argList[0]
@@ -1210,6 +1240,7 @@ def runOPD(argList):
     myargs = '%s -c %s -i %s -e %d -t %d > %s 2>&1' % (
         OPD_inst, OPD_cmd, inst, eimage, nthread,
         OPD_log)
+
     if debugLevel >= 2:
         print('*******Runnnig PHOSIM with following parameters*******')
         print('Check the log file below for progress')
@@ -1222,6 +1253,7 @@ def runOPD(argList):
         runProgram('date')
     if os.path.isfile(zTrueFile):
         os.remove(zTrueFile)
+    
     fz = open(zTrueFile, 'ab')
     for i in range(nFieldp4 * nOPDw):
         src = srcFile.replace('.fits.gz', '_%d.fits.gz' % i)

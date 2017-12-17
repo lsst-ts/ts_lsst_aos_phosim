@@ -289,6 +289,10 @@ class aosWFS(object):
                         print("passed %d, %s" % (iField, self.wfsName[ioffset]))
 
             # Make an image of the 8 donuts
+
+            # Set the size of figure as 10 inch by 5 inch
+            plt.figure(figsize=(10, 5))
+
             for iField in range(metr.nFieldp4-self.nWFS, metr.nFieldp4):
 
                 # Get the chip name, pixel position x, y of dunut
