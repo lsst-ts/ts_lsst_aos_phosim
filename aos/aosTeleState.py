@@ -931,10 +931,10 @@ class aosTeleState(object):
 
                 if (self.nOPDw == 1):
                     opdFile = os.path.join(self.imageDir, iterFolder,
-                                           "sim%d_iter%d_opd%d.fits" % (self.iSim, self.iIter, iField))
+                                           "sim%d_iter%d_opd%d.fits.gz" % (self.iSim, self.iIter, iField))
                 else:
                     opdFile = os.path.join(self.imageDir, iterFolder,
-                                    "sim%d_iter%d_opd%d_w%d.fits" % (self.iSim, self.iIter, iField, ii))
+                                    "sim%d_iter%d_opd%d_w%d.fits.gz" % (self.iSim, self.iIter, iField, ii))
 
                 hardLinkFileList.append(opdFile)
 
@@ -1215,12 +1215,26 @@ class aosTeleState(object):
         return fieldXY2ChipFocalPlane(focalPlanePath, fieldX, fieldY, debugLevel=debugLevel)
 
 def runOPD(argList):
+    """
+    
+    Run the PhoSim to get the optical path difference (OPD) data, move to the indicated directory, and 
+    transform the basis of OPD to annular Zk.
+    
+    Arguments:
+        argList {[list]} -- Arguments to get the OPD data in annular Zk.
+    """
+
+    # Argument list
+
+    # Phosim related arguments
     OPD_inst = argList[0]
     OPD_cmd = argList[1]
     inst = argList[2]
     eimage = argList[3]
+    nthread = argList[15]
     OPD_log = argList[4]
     phosimDir = argList[5]
+
     zTrueFile = argList[6]
     nFieldp4 = argList[7]
     znwcs = argList[8]
@@ -1230,55 +1244,117 @@ def runOPD(argList):
     srcFile = argList[12]
     dstFile = argList[13]
     nOPDw = argList[14]
-    nthread = argList[15]
+    
     debugLevel = argList[16]
 
-    if debugLevel >= 3:
-        runProgram('head %s' % OPD_inst)
-        runProgram('head %s' % OPD_cmd)
+    # Check the inst and cmd files by displaying first lines of a file
+    if (debugLevel >= 3):
+        runProgram("head %s" % OPD_inst)
+        runProgram("head %s" % OPD_cmd)
 
-    myargs = '%s -c %s -i %s -e %d -t %d > %s 2>&1' % (
-        OPD_inst, OPD_cmd, inst, eimage, nthread,
-        OPD_log)
+    # Run the PhoSim to get the OPD images
+    myargs = "%s -c %s -i %s -e %d -t %d > %s 2>&1" % (OPD_inst, OPD_cmd, inst, 
+                                                       eimage, nthread, OPD_log)
+    runPhoSim(phosimDir, argstring=myargs)
 
-    if debugLevel >= 2:
-        print('*******Runnnig PHOSIM with following parameters*******')
-        print('Check the log file below for progress')
-        print('%s' % myargs)
-        runProgram('date')
-    runProgram('python %s/phosim.py' %
-                   phosimDir, argstring=myargs)
-    if debugLevel >= 2:
-        print('DONE RUNNING PHOSIM FOR OPD: %s' % OPD_inst)
-        runProgram('date')
+    # Check the running arguments and date
+    if (debugLevel >= 2):
+        print("******* Runnnig PHOSIM with following parameters *******")
+        print("Check the log file below for progress")
+        print("%s" % myargs)
+        runProgram("date")
+
+    # Check the calculation is done and show the data
+    if (debugLevel >= 2):
+        print("Done running PhoSim for OPD: %s" % OPD_inst)
+        runProgram("date")
+    
+    # Move the FITS.gz files and get the related file name
+    opdFileList = []
+    for ii in range(nFieldp4 * nOPDw):
+
+        # Move the FITS file
+        src = srcFile.replace(".fits.gz", "_%d.fits.gz" % ii)
+        if (nOPDw == 1):
+            dst = dstFile.replace("opd", "opd%d" % ii)
+        else:
+            dst = dstFile.replace("opd", "opd%d_w%d" % (ii%nFieldp4, int(ii/nFieldp4)))
+
+        shutil.move(src, dst)
+
+        # Collect the file path
+        opdFileList.append(dst)
+
+    # Get the OPD in Zk and write into the file
+
+    # Remove the file if it exists already
     if os.path.isfile(zTrueFile):
         os.remove(zTrueFile)
-    
-    fz = open(zTrueFile, 'ab')
-    for i in range(nFieldp4 * nOPDw):
-        src = srcFile.replace('.fits.gz', '_%d.fits.gz' % i)
-        if nOPDw == 1:
-            dst = dstFile.replace('opd', 'opd%d' % i)
-        else:
-            dst = dstFile.replace('opd', 'opd%d_w%d' % (i%nFieldp4, int(i/nFieldp4)))
-        shutil.move(src, dst)
-        runProgram('gunzip -f %s' % dst)
-        opdFile = dst.replace('.gz', '')
-        IHDU = fits.open(opdFile)
-        opd = IHDU[0].data  # Phosim OPD unit: um
-        IHDU.close()
+
+    fz = open(zTrueFile, "ab")
+    for opdFitsFile in opdFileList:
+
+        # Get the opd data (PhoSim OPD unit: um)
+        opd = fits.getdata(opdFitsFile)
+
+        # Fit the OPD map with Zk and write into the file
         idx = (opd != 0)
-        Z = ZernikeAnnularFit(opd[idx], opdx[idx], opdy[idx],
-                                  znwcs, obscuration)
-        np.savetxt(fz, Z.reshape(1, -1), delimiter=' ')
+        Z = ZernikeAnnularFit(opd[idx], opdx[idx], opdy[idx], znwcs, obscuration)
+        np.savetxt(fz, Z.reshape(1, -1), delimiter=" ")
 
     fz.close()
 
-    if debugLevel >= 3:
+    # Show the OPD condition
+    if (debugLevel >= 3):
         print(opdx)
         print(opdy)
         print(znwcs)
         print(obscuration)
+
+def runPhoSim(phosimDir, argstring="-h"):
+    """
+    
+    Run the PhoSim program
+    
+    Arguments:
+        phosimDir {[str]} -- PhoSim directory.
+        
+    Keyword Arguments:
+        argstring {[str]} -- Arguments for PhoSim. (default: {"-h})
+    """
+
+    # Path of phosim.py script 
+    phosimRunPath = os.path.join(phosimDir, "phosim.py")
+
+    # Command to execute the python
+    command = " ".join(["python", phosimRunPath])
+
+    # Run the PhoSim with the related arguments
+    runProgram(command, argstring=argstring)
+
+def moveFITSandUngzip(src, dst):
+    """
+    
+    Move the FITS.gz file and do the ungzip.
+    
+    Arguments:
+        src {[str]} -- Source file path.
+        dst {[str]} -- Destination file path.
+    
+    Returns:
+        [str] -- Unzipped file path.
+    """
+
+    # Move the FITS.gz file 
+    shutil.move(src, dst)
+    
+    # Unzip the FITS file
+    runProgram("gunzip -f %s" % dst)
+    
+    # After the unzip, the extention file name changed from .fits.gz to .fits
+    unzipDst = os.path.splitext(dst)[0]
+
+    return unzipDst
 
 def runWFS1side(argList):
     WFS_inst = argList[0]

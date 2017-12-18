@@ -106,7 +106,7 @@ class aosMetric(object):
         if not fftpsfoff:
             argList = []
             for i in range(self.nField):
-                opdFile = '%s/iter%d/sim%d_iter%d_opd%d.fits' % (
+                opdFile = '%s/iter%d/sim%d_iter%d_opd%d.fits.gz' % (
                     state.imageDir, state.iIter, state.iSim, state.iIter, i)
                 psfFile = opdFile.replace('opd', 'fftpsf')
                 argList.append((opdFile, state, imagedelta,
@@ -128,9 +128,11 @@ class aosMetric(object):
 
                 psfFile = '%s/iter%d/sim%d_iter%d_fftpsf%d.fits' % (
                     state.imageDir, state.iIter, state.iSim, state.iIter, i)
-                IHDU = fits.open(psfFile)
-                psf = IHDU[0].data
-                IHDU.close()
+                # IHDU = fits.open(psfFile)
+                # psf = IHDU[0].data
+                # IHDU.close()
+
+                psf = fits.getdata(psfFile)
 
                 if state.inst[:4] == 'lsst':
                     if i == 0:
@@ -193,13 +195,13 @@ class aosMetric(object):
                         
                     if state.nOPDw == 1:
                         inputFile.append(
-                            '%s/iter%d/sim%d_iter%d_opd%d.fits' % (
+                            '%s/iter%d/sim%d_iter%d_opd%d.fits.gz' % (
                             state.imageDir, state.iIter, state.iSim,
                             state.iIter, i))
                         wlum = state.wavelength
                     else:
                         inputFile.append(
-                            '%s/iter%d/sim%d_iter%d_opd%d_w%d.fits' % (
+                            '%s/iter%d/sim%d_iter%d_opd%d_w%d.fits.gz' % (
                             state.imageDir, state.iIter, state.iSim,
                             state.iIter, i, irun))
                         wlum = aosTeleState.GQwave[state.band][irun]
@@ -288,13 +290,13 @@ class aosMetric(object):
 
                     if state.nOPDw == 1:
                         inputFile.append(
-                            '%s/iter%d/sim%d_iter%d_opd%d.fits' % (
+                            '%s/iter%d/sim%d_iter%d_opd%d.fits.gz' % (
                             state.imageDir, state.iIter, state.iSim,
                             state.iIter, i))
                         wlum = state.wavelength
                     else:
                         inputFile.append(
-                            '%s/iter%d/sim%d_iter%d_opd%d_w%d.fits' % (
+                            '%s/iter%d/sim%d_iter%d_opd%d_w%d.fits.gz' % (
                             state.imageDir, state.iIter, state.iSim,
                             state.iIter, i, irun))
                         wlum = aosTeleState.GQwave[state.band][irun]
@@ -695,9 +697,11 @@ def runEllipticity(argList):
     print('runEllipticity: %s ' % inputFile)
 
     if pixelum == 0:
-        IHDU = fits.open(inputFile[0])
-        opd = IHDU[0].data  # um
-        IHDU.close()
+        # IHDU = fits.open(inputFile[0])
+        # opd = IHDU[0].data  # um
+        # IHDU.close()
+
+        opd = fits.getdata(inputFile[0])
 
         # before psf2eAtmW()
         # (1) remove PTT,
@@ -710,14 +714,19 @@ def runEllipticity(argList):
         elli, _, _, _ = psf2eAtmW(
             opd, wavelength, debugLevel=debugLevel)
     else:
-        IHDU = fits.open(inputFile[0])
-        psf = IHDU[0].data  # unit: um
-        IHDU.close()
+        # IHDU = fits.open(inputFile[0])
+        # psf = IHDU[0].data  # unit: um
+        # IHDU.close()
+
+        psf = fits.getdata(inputFile[0])
 
         # opd only needed to help determine how big mtfa needs to be
-        IHDU = fits.open(inputFile[1])
-        opd = IHDU[0].data  # unit: um
-        IHDU.close()
+        # IHDU = fits.open(inputFile[1])
+        # opd = IHDU[0].data  # unit: um
+        # IHDU.close()
+
+        opd = fits.getdata(inputFile[1])
+
         iad = (opd != 0)
 
         elli, _, _, _ = psf2eAtmW(
@@ -742,9 +751,11 @@ def runPSSNandMore(argList):
     print('runPSSNandMore: %s ' % inputFile)
 
     if pixelum == 0:
-        IHDU = fits.open(inputFile[0])
-        opd = IHDU[0].data  # unit: um
-        IHDU.close()
+        # IHDU = fits.open(inputFile[0])
+        # opd = IHDU[0].data  # unit: um
+        # IHDU.close()
+
+        opd = fits.getdata(inputFile[0])
 
         # before calc_pssn,
         # (1) remove PTT,
@@ -756,14 +767,19 @@ def runPSSNandMore(argList):
 
         pssn = calc_pssn(opd, wavelength, debugLevel=debugLevel)
     else:
-        IHDU = fits.open(inputFile[0])
-        psf = IHDU[0].data  # unit: um
-        IHDU.close()
+        # IHDU = fits.open(inputFile[0])
+        # psf = IHDU[0].data  # unit: um
+        # IHDU.close()
+
+        psf = fits.getdata(inputFile[0])
 
         # opd only needed to help determine pupil geometry
-        IHDU = fits.open(inputFile[1])
-        opd = IHDU[0].data  # unit: um
-        IHDU.close()
+        # IHDU = fits.open(inputFile[1])
+        # opd = IHDU[0].data  # unit: um
+        # IHDU.close()
+
+        opd = fits.getdata(inputFile[1])
+
         iad = (opd != 0)
 
         pssn = calc_pssn(psf, wavelength, type='psf', pmask=iad,
@@ -785,9 +801,11 @@ def runFFTPSF(argList):
     debugLevel = argList[6]
     print('runFFTPSF: %s ' % opdFile)
 
-    IHDU = fits.open(opdFile)
-    opd = IHDU[0].data  # unit: um
-    IHDU.close()
+    # IHDU = fits.open(opdFile)
+    # opd = IHDU[0].data  # unit: um
+    # IHDU.close()
+
+    opd = fits.getdata(opdFile)
 
     # before opd2psf,
     # (1) remove PTT, (for consistence with calc_pssn,
