@@ -187,7 +187,7 @@ class aosWFS(object):
 
                     # Get the list of paths matching the pathname pattern
                     patheNamePattern = os.path.join(state.imageDir, "iter%d" % state.iIter, 
-                                            "*%d*%s*%s*E00%d.fits" % (visit, chipStr, self.halfChip[ioffset], iexp))
+                                            "*%d*%s*%s*E00%d.fits.gz" % (visit, chipStr, self.halfChip[ioffset], iexp))
 
                     src = glob(patheNamePattern)
 
@@ -245,12 +245,16 @@ class aosWFS(object):
                         # note: rot90 rotates the array,
                         # not the image (as you see in ds9, or Matlab with "axis xy")
                         # that is why we need to flipud and then flip back
+
+                        # iField = 31 --> R44_S00
                         if (iField == metr.nField):
                             psf = np.flipud(np.rot90(np.flipud(psf), 2))
                         
+                        # iField = 32
                         elif (iField == metr.nField+1):
                             psf = np.flipud(np.rot90(np.flipud(psf), 3))
                         
+                        # iField = 33 --> R00_S22
                         elif (iField == metr.nField+3):
                             psf = np.flipud(np.rot90(np.flipud(psf), 1))
 
@@ -309,14 +313,8 @@ class aosWFS(object):
                     # Get the file list
                     src = glob(patheNamePattern)
                     
-                    # Open the image fits file
-                    IHDU = fits.open(src[0])
-
                     # Get the image data
-                    psf = IHDU[0].data
-
-                    # Close the image fits file
-                    IHDU.close()
+                    psf = fits.getdata(src[0])
                     
                     # Arrange the donut images to a single figure
                     if (instName == self.LSST):

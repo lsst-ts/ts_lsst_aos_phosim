@@ -2,6 +2,8 @@ import os, re, subprocess
 import numpy as np
 import matplotlib.pyplot as plt
 
+from lsst.cwfs.tools import ZernikeFit, ZernikeEval
+
 def getInstName(instruFile):
     """
     
@@ -939,6 +941,38 @@ def fieldAgainstRuler(ruler, field, chipPixel):
 
     return raft, chip, pixelPos
 
+def getMirrorRes(surf, x, y, n, zlistFile=None):
+    """
+    
+    Get the residue of surface (mirror print along z-axis) after the fitting with Zk.
+    
+    Arguments:
+        surf {[ndarray]} -- Surface to fit.
+        x {[ndarray]} -- Normalized x coordinate.
+        y {[ndarray]} -- Normalized y coordinate.
+        n {[int]} -- Number of Zernike terms to fit.
+    
+    Keyword Arguments:
+        zlistFile {[str]} -- File path to save the fitted Zk. (default: {None})
+    
+    Returns:
+        [ndarray] -- Surface residue after the fitting.
+    """
+
+    # Check the reason to use Zk instead of annular Zk with Bo. Is it for the PhoSim?
+
+    # Get the surface change along the z-axis in the basis of Zk
+    # It is noticed that the x and y coordinates are normalized for the fitting 
+    zc = ZernikeFit(surf, x, y, n)
+
+    # Residue of fitting
+    res = surf - ZernikeEval(zc, x, y)
+
+    # Save the file of fitted Zk
+    if (zlistFile is not None):
+        np.savetxt(zlistFile, zc)
+
+    return res
 
 if __name__ == "__main__":
 

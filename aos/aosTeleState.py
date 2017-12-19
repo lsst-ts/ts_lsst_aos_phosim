@@ -3,11 +3,8 @@
 # @author: Bo Xin
 # @      Large Synoptic Survey Telescope
 
-import os
-#import sys
-import shutil
-import glob
-# import subprocess
+import os, shutil
+from glob import glob
 import multiprocessing
 
 import numpy as np
@@ -16,9 +13,9 @@ from astropy.time import Time
 import aos.aosCoTransform as ct
 from scipy.interpolate import Rbf
 
-from lsst.cwfs.tools import ZernikeAnnularFit, ZernikeFit, ZernikeEval, extractArray
+from lsst.cwfs.tools import ZernikeAnnularFit
 
-from aos.aosUtility import getInstName, isNumber, getLUTforce, hardLinkFile, runProgram, writeToFile, fieldXY2ChipFocalPlane
+from aos.aosUtility import getInstName, isNumber, getLUTforce, hardLinkFile, runProgram, writeToFile, fieldXY2ChipFocalPlane, getMirrorRes
 
 import matplotlib.pyplot as plt
 
@@ -835,6 +832,7 @@ class aosTeleState(object):
             for ii in range(self.znPert):
                 content += "izernike 2 %d %s\n" % (ii, zz[ii]*1e-3)
 
+            # Do not understand why this residue map is important to PhoSim. Check with Bo.
             content += "surfacemap 0 %s 1\n" % os.path.abspath(self.resFile1)
             content += "surfacemap 2 %s 1\n" % os.path.abspath(self.resFile3)
 
@@ -846,12 +844,13 @@ class aosTeleState(object):
         # M2 surface print
         if (self.M2surf is not None):
             # M2surf already converted into ZCRS
-            writeM2zres(self.M2surf, M2.bx, M2.by, M2.R, M2.Ri, self.znPert,
+            writeM2zres(self.M2surf, M2.bx, M2.by, M2.Ri, M2.R, self.znPert,
                         self.M2zlist, self.resFile2, self.surfaceGridN)
             zz = np.loadtxt(self.M2zlist)
             for ii in range(self.znPert):
                 content += "izernike 1 %d %s\n" % (ii, zz[ii]*1e-3) 
 
+            # Do not understand why this residue map is important to PhoSim. Check with Bo.
             content += "surfacemap 1 %s 1\n" % os.path.abspath(self.resFile2)
 
         # Camera lens correction in Zk. ComCam has no such data now.
@@ -996,6 +995,21 @@ class aosTeleState(object):
         writeToFile(self.OPD_cmd, content=content, sourceFile=self.pertCmdFile, mode="w")
 
     def getWFSAll(self, obsID, timeIter, wfs, metr, numproc, debugLevel=0):
+        """
+        
+        Calculation the wavefront sensor (WFS) images by PhoSim. 
+        
+        Arguments:
+            obsID {[int]} -- Observation ID.
+            timeIter {[Time]} -- Iteration time.
+            wfs {[aosWFS]} -- aosWFS object.
+            metr {[aosMetric]} -- aosMetric object.
+            numproc {[int]} -- Number of processor for parallel calculation.
+        
+        Keyword Arguments:
+            debugLevel {int} -- Debug level. The higher value gives more information.
+                                (default: {0})
+        """
 
         # Write the WFS instrument file for PhoSim use
         self.__writeWFSinst(obsID, timeIter, wfs, metr)
@@ -1010,6 +1024,7 @@ class aosTeleState(object):
                             self.WFS_log[irun], self.phosimDir, numproc, debugLevel))
 
         # Calculate the WFS by parallel calculation
+        # This part is for the comcam. Not sure this part of code is good or not. Need to check.
         pool = multiprocessing.Pool(numproc)
         pool.map(runWFS1side, argList)
         pool.close()
@@ -1019,36 +1034,46 @@ class aosTeleState(object):
 
         for i in range(metr.nFieldp4 - wfs.nWFS, metr.nFieldp4):
 
+            # Get the chip name and pixel x, y positions for a certain donut defined in field x, y
             chipStr, px, py = self.fieldXY2Chip(metr.fieldXp[i], metr.fieldYp[i], debugLevel=debugLevel)
 
-            if (wfs.nRun == 1): # phosim generates C0 & C1 already
+            # For lsst camera
+            if (wfs.nRun == 1):
 
+                # phosim generates C0 & C1 already
                 for ioffset in [0, 1]:
                     for iexp in [0, 1]:
-                        src = glob.glob('%s/output/*%s_f%d_%s*%s*E00%d.fit*' %
-                                    (self.phosimDir, obsID, phosimFilterID[self.band],
-                                    chipStr, wfs.halfChip[ioffset], iexp))
-                        if '.gz' in src[0]:
-                            runProgram('gunzip -f %s' % src[0])
-                        elif 'gz' in src[-1]:
-                            runProgram('gunzip -f %s' % src[-1])
-                        chipFile = src[0].replace('.gz', '')
-                        runProgram('mv -f %s %s/iter%d' % (chipFile, self.imageDir, self.iIter))
 
-            else: # need to pick up two sets of fits.gz with diff phosim ID
+                        # Path of source file
+                        srcFileName = os.path.join(self.phosimDir, "output", "*%s_f%d_%s*%s*E00%d.fits.gz" % (
+                                        obsID, phosimFilterID[self.band], chipStr, wfs.halfChip[ioffset], iexp))
+                        src = glob(srcFileName)[0]
 
+                        # Destination directory
+                        dst = os.path.join(self.imageDir, "iter%d" % self.iIter)
+
+                        # Move the file
+                        shutil.move(src, dst)
+
+            # For the comcam
+            elif (wfs.nRun == 2):
+
+                # need to pick up two sets of fits.gz with diff phosim ID
                 for ioffset in [0, 1]:
-                    src = glob.glob('%s/output/*%s_f%d_%s*E000.fit*' %
-                                    (self.phosimDir, obsID + ioffset, phosimFilterID[self.band], 
-                                     chipStr))
-                    if '.gz' in src[0]:
-                        runProgram('gunzip -f %s' % src[0])
-                    elif 'gz' in src[-1]:
-                        runProgram('gunzip -f %s' % src[-1])
-                    
-                    chipFile = src[0].replace('.gz', '')
-                    targetFile = os.path.split(chipFile.replace('E000', '%s_E000' % wfs.halfChip[ioffset]))[1]
-                    runProgram('mv -f %s %s/iter%d/%s' % (chipFile, self.imageDir, self.iIter, targetFile))
+
+                    # Path of source file
+                    srcFileName = os.path.join(self.phosimDir, "output", "*%s_f%d_%s*E000.fits.gz" % (obsID+ioffset, 
+                                        phosimFilterID[self.band], chipStr))
+                    src = glob(srcFileName)[0]
+                                        
+                    # Target file name
+                    targetFileName = os.path.split(src.replace("E000", "%s_E000" % wfs.halfChip[ioffset]))[1]
+
+                    # Destination file 
+                    dst = os.path.join(self.imageDir, "iter%d" % self.iIter, targetFileName)
+
+                    # Move the file
+                    shutil.move(src, dst)
 
     def __writeWFSinst(self, obsID, timeIter, wfs, metr):
         """
@@ -1280,7 +1305,8 @@ def runOPD(argList):
         else:
             dst = dstFile.replace("opd", "opd%d_w%d" % (ii%nFieldp4, int(ii/nFieldp4)))
 
-        shutil.move(src, dst)
+        # Move the file and get the returned file path
+        dst = shutil.move(src, dst)
 
         # Collect the file path
         opdFileList.append(dst)
@@ -1311,6 +1337,38 @@ def runOPD(argList):
         print(znwcs)
         print(obscuration)
 
+def runWFS1side(argList):
+    """
+    
+    Run the PhoSim to get the wave front sensor (WFS) data.
+    
+    Arguments:
+        argList {[list]} -- Arguments to get the WFS data.
+    """
+
+    # Argument list
+    WFS_inst = argList[0]
+    WFS_cmd = argList[1]
+    inst = argList[2]
+    eimage = argList[3]
+    WFS_log = argList[4]
+    phosimDir = argList[5]
+    numproc = argList[6]
+
+    debugLevel = argList[7]
+
+    # Run the PhoSim to get the WFS images
+    myargs = "%s -c %s -i %s -p %d -e %d > %s 2>&1" % (WFS_inst, WFS_cmd, inst, 
+                                                       numproc, eimage, WFS_log)
+
+    runPhoSim(phosimDir, argstring=myargs)
+
+    # Check the running arguments
+    if (debugLevel >= 2):
+        print("******** Runnnig PhoSim with following parameters ********")
+        print("Check the log file below for progress")
+        print("%s" % myargs)
+
 def runPhoSim(phosimDir, argstring="-h"):
     """
     
@@ -1332,159 +1390,195 @@ def runPhoSim(phosimDir, argstring="-h"):
     # Run the PhoSim with the related arguments
     runProgram(command, argstring=argstring)
 
-def moveFITSandUngzip(src, dst):
+def writeM1M3zres(surf, x, y, Ri, R, R3i, R3, n, zlistFile, resFile1, resFile3, nodeID, surfaceGridN):
     """
     
-    Move the FITS.gz file and do the ungzip.
+    Write the residue of M1M3 mirror print after the fitting with Zk.
     
     Arguments:
-        src {[str]} -- Source file path.
-        dst {[str]} -- Destination file path.
-    
-    Returns:
-        [str] -- Unzipped file path.
+        surf {[ndarray]} -- Surface to fit.
+        x {[ndarray]} -- x coordinate in m.
+        y {[ndarray]} -- y coordinate in m.
+        Ri {[float]} -- Inner radius of mirror 1 in m.
+        R {[float]} -- Outer radius of mirror 1 in m.
+        R3i {[float]} -- Inner radius of mirror 3 in m.
+        R3 {[float]} -- Outer radius of mirror 3 in m.
+        n {[int]} -- Number of Zernike terms to fit.
+        zlistFile {[str]} -- File path to save the fitted Zk.
+        resFile1 {[str]} -- File path to save the M1 surface residue map.
+        resFile3 {[str]} -- File path to save the M3 surface residue map.
+        nodeID {[ndarray]} -- Mirror node ID.
+        surfaceGridN {[int]} -- Surface grid number.
     """
 
-    # Move the FITS.gz file 
-    shutil.move(src, dst)
+    # Get the mirror residue and save to file
+    res = getMirrorRes(surf, x/R, y/R, n, zlistFile=zlistFile)
+
+    # Indexes of M1 and M3
+    idx1 = (nodeID == 1)
+    idx3 = (nodeID == 3)
+
+    # Zemax needs all parameters in mm
+    # x, y, Ri, R: m --> mm. Res: um --> mm.  
+    # The unit of residue is um because the input surface is um.
+
+    # Grid sample map for M1
+    gridSamp(x[idx1]*1e3, y[idx1]*1e3, res[idx1]*1e-3, Ri*1e3, R*1e3, 
+             resFile1, surfaceGridN, surfaceGridN, plotFig=True)
+
+    # Grid sample map for M3
+    gridSamp(x[idx3]*1e3, y[idx3]*1e3, res[idx3]*1e-3, R3i*1e3, R3*1e3, 
+             resFile3, surfaceGridN, surfaceGridN, plotFig=True)
+
+def writeM2zres(surf, x, y, Ri, R, n, zlistFile, resFile2, surfaceGridN):
+    """
     
-    # Unzip the FITS file
-    runProgram("gunzip -f %s" % dst)
+    Write the residue of M2 mirror print after the fitting with Zk.
     
-    # After the unzip, the extention file name changed from .fits.gz to .fits
-    unzipDst = os.path.splitext(dst)[0]
+    Arguments:
+        surf {[ndarray]} -- Surface to fit.
+        x {[ndarray]} -- x coordinate in m.
+        y {[ndarray]} -- y coordinate in m.
+        Ri {[float]} -- Inner radius of mirror 2 in m.
+        R {[float]} -- Outer radius of mirror 2 in m.
+        n {[int]} -- Number of Zernike terms to fit.
+        zlistFile {[str]} -- File path to save the fitted Zk.
+        resFile2 {[str]} -- File path to save the M2 surface residue map.
+        surfaceGridN {[int]} -- Surface grid number.
+    """
 
-    return unzipDst
+    # Get the mirror residue and save to file
+    res = getMirrorRes(surf, x/R, y/R, n, zlistFile=zlistFile)
 
-def runWFS1side(argList):
-    WFS_inst = argList[0]
-    WFS_cmd = argList[1]
-    inst = argList[2]
-    eimage = argList[3]
-    WFS_log = argList[4]
-    phosimDir = argList[5]
-    numproc = argList[6]
-    debugLevel = argList[7]
+    # Zemax needs all parameters in mm
+    # x, y, Ri, R: m --> mm. Res: um --> mm.  
+    # The unit of residue is um because the input surface is um.
+    gridSamp(x*1e3, y*1e3, res*1e-3, Ri*1e3, R*1e3, resFile2, surfaceGridN, surfaceGridN, 
+             plotFig=True)
 
-    myargs = '%s -c %s -i %s -p %d -e %d > %s 2>&1' % (
-        WFS_inst, WFS_cmd, inst, numproc, eimage,
-        WFS_log)
-    if debugLevel >= 2:
-        print('********Runnnig PHOSIM with following parameters\
-        ********')
-        print('Check the log file below for progress')
-        print('%s' % myargs)
+def gridSamp(xf, yf, zf, innerR, outerR, resFile, nx, ny, plotFig=False):
+    """
+    
+    Get the residue map used in Zemax.
+    
+    Arguments:
+        xf {[ndarray]} -- x position in mm.
+        yf {[ndarray]} -- y position in mm.
+        zf {[ndarray]} -- Surface map in mm.
+        innerR {[float]} -- Inner radius in mm.
+        outerR {[float]} -- Outer radius in mm.
+        resFile {[str]} -- File path to write the surface residue map.
+        nx {[int]} -- Number of pixel along x-axis of surface residue map. It is noted that 
+                      the real pixel number is nx + 4.
+        ny {[int]} -- Number of pixel along y-axis of surface residue map. It is noted that 
+                      the real pixel number is ny + 4. 
+    
+    Keyword Arguments:
+        plotFig {bool} -- Plot the figure or not. (default: {False})
+    """
 
-    runProgram('python %s/phosim.py' %
-               phosimDir, argstring=myargs)
+    # Do not understand the meaning for this map. Check with Bo.
 
-
-def writeM1M3zres(surf, x, y, Ri, R, R3i, R3, n, zlist, resFile1, resFile3,
-                      nodeID, surfaceGridN):
-
-    zc = ZernikeFit(surf, x / R, y / R, n)
-    res = surf - ZernikeEval(zc, x / R, y / R)
-    np.savetxt(zlist, zc)
-
-    idx1 = nodeID == 1
-    idx3 = nodeID == 3
-
-    # so far x and y are in meter, res is in micron
-    # zemax wants everything in mm
-    gridSamp(x[idx1] * 1e3, y[idx1] * 1e3, res[idx1] * 1e-3,
-                 Ri * 1e3, R * 1e3, resFile1,
-                 surfaceGridN, surfaceGridN, 1)
-    gridSamp(x[idx3] * 1e3, y[idx3] * 1e3, res[idx3] * 1e-3,
-                 R3i * 1e3, R3 * 1e3, resFile3,
-                 surfaceGridN, surfaceGridN, 1)
-
-
-def writeM2zres(surf, x, y, R, Ri, n, zlist, resFile2, surfaceGridN):
-
-    # Fit the mirror surface
-    zc = ZernikeFit(surf, x / R, y / R, n)
-
-    res = surf - ZernikeEval(zc, x / R, y / R)
-    np.savetxt(zlist, zc)
-
-    # so far x and y are in meter, res is in micron
-    # zemax wants everything in mm
-    gridSamp(x * 1e3, y * 1e3, res * 1e-3, Ri * 1e3, R * 1e3, resFile2,
-                 surfaceGridN, surfaceGridN, 1)
-
-
-def gridSamp(xf, yf, zf, innerR, outerR, resFile, nx, ny, plots):
-
+    # Radial basis function approximation/interpolation of surface
     Ff = Rbf(xf, yf, zf)
-    #do not want to cover the edge? change 4->2 on both lines
-    NUM_X_PIXELS = nx + 4  #alway extend 2 points on each side
-    NUM_Y_PIXELS = ny + 4
 
-    extFx = (NUM_X_PIXELS - 1) / (nx - 1) #this is spatial extension factor
-    extFy = (NUM_Y_PIXELS - 1) / (ny - 1)
+    # Number of grid points on x-, y-axis. 
+    # Alway extend 2 points on each side
+    # Do not want to cover the edge? change 4->2 on both lines
+    NUM_X_PIXELS = nx+4
+    NUM_Y_PIXELS = ny+4
+
+    # This is spatial extension factor, which is calculated by the slope at edge
+    extFx = (NUM_X_PIXELS-1) / (nx-1)
+    extFy = (NUM_Y_PIXELS-1) / (ny-1)
     extFr = np.sqrt(extFx * extFy)
 
-    delx =  outerR*2 *extFx / (NUM_X_PIXELS - 1)
-    dely =  outerR*2 *extFy / (NUM_Y_PIXELS - 1)
+    # Delta x and y 
+    delx = outerR*2*extFx / (NUM_X_PIXELS-1)
+    dely = outerR*2*extFy / (NUM_Y_PIXELS-1)
 
+    # Minimum x and y
     minx = -0.5*(NUM_X_PIXELS-1)*delx
     miny = -0.5*(NUM_Y_PIXELS-1)*dely
-    epsilon = .0001 * min(delx, dely)
+
+    # Calculate the epsilon
+    epsilon = 1e-4*min(delx, dely)
+    
     zp = np.zeros((NUM_X_PIXELS, NUM_Y_PIXELS))
 
-    outid = open(resFile, 'w');
+    # Open the surface residue file and do the writing
+    outid = open(resFile, "w");
+
     # Write four numbers for the header line
-    outid.write('%d %d %.9E %.9E\n' % (NUM_X_PIXELS, NUM_Y_PIXELS, delx, dely))
+    outid.write("%d %d %.9E %.9E\n" % (NUM_X_PIXELS, NUM_Y_PIXELS, delx, dely))
 
     #  Write the rows and columns
-    for j in range(1, NUM_X_PIXELS + 1):
-        for i in range(1, NUM_Y_PIXELS + 1):
-            x =  minx + (i - 1) * delx
-            y =  miny + (j - 1) * dely
-            y = -y  # invert top to bottom, because Zemax reads (-x,-y) first
+    for jj in range(1, NUM_X_PIXELS + 1):
+        for ii in range(1, NUM_Y_PIXELS + 1):
 
-            # compute the sag */
-            r = np.sqrt(x*x+y*y)
+            # x and y positions
+            x =  minx + (ii - 1) * delx
+            y =  miny + (jj - 1) * dely
+            
+            # Invert top to bottom, because Zemax reads (-x,-y) first
+            y = -y
 
-            if (r<innerR/extFr or r>outerR*extFr):
+            # Calculate the radius
+            r = np.sqrt(x**2 + y**2)
+
+            # Set the value as zero when the radius is not between the inner and outer radius.
+            if (r < innerR/extFr) or (r > outerR*extFr):
+                
                 z=0
                 dx=0
                 dy=0
                 dxdy=0
+
+            # Get the value by the fitting
             else:
-                z=Ff(x,y)
-                tem1=Ff((x+epsilon),y)
-                tem2=Ff((x-epsilon),y)
+
+                # Get the z
+                z = Ff(x, y)
+                
+                # Compute the dx
+                tem1 = Ff((x+epsilon), y)
+                tem2 = Ff((x-epsilon), y)
                 dx = (tem1 - tem2)/(2.0*epsilon)
 
-                # compute dz/dy */
-                tem1=Ff(x,(y+epsilon))
-                tem2=Ff(x,(y-epsilon))
+                # Compute the dy
+                tem1 = Ff(x, (y+epsilon))
+                tem2 = Ff(x, (y-epsilon))
                 dy = (tem1 - tem2)/(2.0*epsilon)
 
-                # compute d2z/dxdy */
-                tem1=Ff((x+epsilon),(y+epsilon))
-                tem2=Ff((x-epsilon),(y+epsilon))
+                # Compute the dxdy
+                tem1 = Ff((x+epsilon), (y+epsilon))
+                tem2 = Ff((x-epsilon), (y+epsilon))
                 tem3 = (tem1 - tem2)/(2.0*epsilon)
-                tem1=Ff((x+epsilon),(y-epsilon))
-                tem2=Ff((x-epsilon),(y-epsilon))
+                
+                tem1 = Ff((x+epsilon), (y-epsilon))
+                tem2 = Ff((x-epsilon), (y-epsilon))
                 tem4 = (tem1 - tem2)/(2.0*epsilon)
+                
                 dxdy = (tem3 - tem4)/(2.0*epsilon)
 
-            zp[NUM_X_PIXELS+1-j-1, i-1]=z
-            outid.write('%.9E %.9E %.9E %.9E\n'% (z, dx, dy, dxdy))
+            zp[NUM_X_PIXELS+1-jj-1, ii-1] = z
+
+            outid.write("%.9E %.9E %.9E %.9E\n" % (z, dx, dy, dxdy))
 
     outid.close()
 
-    if plots:
+    # Discuss with Bo for the meaning of this figure.
+    if plotFig:
+
         fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-        # the input data to gridSamp.m is in mm (zemax default)
-        sc = ax[1].scatter(xf, yf, s=25, c=zf*1e6, marker='.', edgecolor='none')
-        ax[1].axis('equal')
-        ax[1].set_title('Surface map on FEA grid (nm)')
+
+        # The input data to gridSamp.m is in mm (zemax default)
+        sc = ax[1].scatter(xf, yf, s=25, c=zf*1e6, marker=".", edgecolor="none")
+        ax[1].axis("equal")
+        ax[1].set_title("Surface map on FEA grid (nm)")
         ax[1].set_xlim([-outerR, outerR])
         ax[1].set_ylim([-outerR, outerR])
-        ax[1].set_xlabel('x (mm)')
+        ax[1].set_xlabel("x (mm)")
 
         xx = np.arange(minx, -minx + delx, delx)
         yy = np.arange(miny, -miny + dely, dely)
@@ -1492,20 +1586,20 @@ def gridSamp(xf, yf, zf, innerR, outerR, resFile, nx, ny, plots):
         xp = xp.reshape((NUM_X_PIXELS*NUM_Y_PIXELS,1))
         yp = yp.reshape((NUM_X_PIXELS*NUM_Y_PIXELS,1))
         zp = zp.reshape((NUM_X_PIXELS*NUM_Y_PIXELS,1))
-        sc = ax[0].scatter(xp, yp, s=25, c=zp*1e6, marker='.',
-                             edgecolor='none')
-        ax[0].axis('equal')
-        ax[0].set_title('grid input to ZEMAX (nm)')
+        sc = ax[0].scatter(xp, yp, s=25, c=zp*1e6, marker=".", edgecolor="none")
+
+        ax[0].axis("equal")
+        ax[0].set_title("grid input to ZEMAX (nm)")
         ax[0].set_xlim([-outerR, outerR])
         ax[0].set_ylim([-outerR, outerR])
-        ax[0].set_xlabel('x (mm)')
-        ax[0].set_ylabel('y (mm)')
+        ax[0].set_xlabel("x (mm)")
+        ax[0].set_ylabel("y (mm)")
 
         fig.subplots_adjust(right=0.8)
         cbar_ax = fig.add_axes([0.85, 0.1, 0.03, 0.8])
         fig.colorbar(sc, cax=cbar_ax)
 
-        plt.savefig(resFile.replace('.txt','.png'))
+        plt.savefig(resFile.replace(".txt", ".png"))
 
 def getTelEffWave(wavelength, band):
     """
