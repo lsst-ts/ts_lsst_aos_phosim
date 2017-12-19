@@ -117,7 +117,7 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
     # *****************************************
 
     # Instantiate the AOS metrology and controller
-    metr = aosMetric(args.inst, state.opdSize, wfs.znwcs3, args.debugLevel)
+    metr = aosMetric(aosDataDir, args.inst, debugLevel=args.debugLevel)
     ctrl = aosController(aosDataDir, args.inst, args.controllerParam, esti, metr,
                          M1M3.force, M2.force, effwave, args.gain, covM=wfs.covM, 
                          debugLevel=args.debugLevel)
@@ -186,11 +186,8 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
             # Need to redesign this part.
             state.getOPDAllfromBase(args.baserun, metr.nFieldp4)
             
-            # Check I need this or not for PSF related calcualtion with Bo
-            # state.getPSFAllfromBase(args.baserun, metr)
-
-            metr.getPSSNandMorefromBase(args.baserun, state)
-            metr.getEllipticityfromBase(args.baserun, state)
+            metr.getPSSNandMorefromBase(args.baserun, state.iSim)
+            metr.getEllipticityfromBase(args.baserun, state.iSim)
 
             if args.sensor not in ("ideal", "covM", "pass", "check"):
                 wfs.getZ4CfromBase(args.baserun, state.iSim)
@@ -200,7 +197,7 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
             state.getOPDAll(obsID, metr, args.numproc, wfs.znwcs, wfs.inst.obscuration, 
                             opdoff=args.opdoff, debugLevel=args.debugLevel)
 
-            metr.getPSSNandMore(args.pssnoff, state, args.numproc, args.debugLevel)
+            metr.getPSSNandMore(args.pssnoff, state, args.numproc, debugLevel=args.debugLevel)
             metr.getEllipticity(args.ellioff, state, args.numproc, args.debugLevel)
 
             if args.sensor not in ("ideal", "covM", "pass"):

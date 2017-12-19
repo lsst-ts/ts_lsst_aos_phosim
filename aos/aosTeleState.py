@@ -147,12 +147,6 @@ class aosTeleState(object):
         if (self.iqBudget is not None):
             self.iqBudget = self.iqBudget*1e-3
 
-        # Get the size of point spread function (PSF) stamp
-        # Check with Bo for the math here
-        fno = 1.2335
-        k = fno*self.effwave/0.2
-        self.psfStampSize = int(self.opdSize + np.rint((self.opdSize * (k-1) + 1e-5) / 2) * 2)
-
         # Simulation number
         self.iSim = iSim
 
@@ -619,8 +613,7 @@ class aosTeleState(object):
             if (metr is not None) and (metr.GQFWHMeff is None):
                 PSSNFile_m1 = os.path.join(self.imageDir, preIterFolder,
                                            "sim%d_iter%d_PSSN.txt" % (self.iSim, self.iIter-1))
-                data = np.loadtxt(PSSNFile_m1)
-                metr.GQFWHMeff = data[1, -1]
+                metr.setGQFWHMeff(loadFilePath=PSSNFile_m1)
 
     def __generateFolder(self, pathToFolder, newFolder):
         """

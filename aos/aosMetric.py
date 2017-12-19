@@ -22,159 +22,167 @@ from aos.aosTeleState import aosTeleState
 
 import matplotlib.pyplot as plt
 
+from aos.aosUtility import getInstName, hardLinkFile
+
 
 class aosMetric(object):
 
-    def __init__(self, instName, opdSize, znwcs3, debugLevel, pixelum=10):
-        if instName[:4] == 'lsst':
-            self.nArm = 6
-            armLen = [0.379, 0.841, 1.237, 1.535, 1.708]
-            armW = [0.2369, 0.4786, 0.5689, 0.4786, 0.2369]
-            self.nRing = len(armLen)
-            self.nField = self.nArm * self.nRing + 1
-            self.nFieldp4 = self.nField + 4
-            self.fieldX = np.zeros(self.nFieldp4)
-            self.fieldY = np.zeros(self.nFieldp4)
-            self.fieldX[0] = 0
-            self.fieldY[0] = 0
-            self.w = [0]
-            for i in range(self.nRing):
-                self.w = np.concatenate((self.w, np.ones(self.nArm) * armW[i]))
-                self.fieldX[i * self.nArm + 1: (i + 1) * self.nArm + 1] =\
-                    armLen[i] * np.cos(np.arange(self.nArm) *
-                                       (2 * np.pi) / self.nArm)
-                self.fieldY[i * self.nArm + 1: (i + 1) * self.nArm + 1] =\
-                    armLen[i] * np.sin(np.arange(self.nArm) *
-                                       (2 * np.pi) / self.nArm)
-            # self.fieldX[self.nField:]=[1.185, -1.185, -1.185, 1.185]
-            # self.fieldY[self.nField:]=[1.185, 1.185, -1.185, -1.185]
-            # counter-clock wise
-            self.fieldX[self.nField:] = [1.176, -1.176, -1.176, 1.176]
-            self.fieldY[self.nField:] = [1.176, 1.176, -1.176, -1.176]
+    # Instrument name
+    LSST = "lsst"
+    ComCam = "comcam"
 
-            self.fwhmModelFileBase = 'data/fwhmModel/fwhm_vs_z_500nm'
+    def __init__(self, aosDataDir, instName, pixelum=10, debugLevel=0):
+        """
+        
+        Initiate the aosMetric object.
+        
+        Arguments:
+            aosDataDir {[str]} -- Directory of metrology parameter file.
+            inst {[str]} -- Instrument name (e.g. lsst or comcam10).
+        
+        Keyword Arguments:
+            pixelum {int} -- Pixel to um. (default: {10})
+            debugLevel {int} -- Debug level. The higher value gives more information.
+                                (default: {0})
+        """
 
-        elif instName[:6] == 'comcam':
-            nRow = 3
-            nCol = 3
-            self.nField = nRow * nCol
-            self.fieldX = np.zeros(self.nField)
-            self.fieldY = np.zeros(self.nField)
-            sensorD = 0.2347
+        # Get Instrument name
+        instName = getInstName(instName)[0]
 
-            for i in range(nRow):
-                for j in range(nCol):
-                    self.fieldX[i * nRow + j] = (i - 1) * sensorD
-                    self.fieldY[i * nRow + j] = (j - 1) * sensorD
+        # Get the position and related weighting defined on Gaussian quadrature plane
+        self.w, self.nField, self.nFieldp4, self.fieldX, self.fieldY = self.__getFieldCoor(instName)
 
-            self.w = np.ones(self.nField)
-            self.nFieldp4 = self.nField
-
-        self.w = self.w / np.sum(self.w)
-
-        # below, p is for PSF
-        self.fieldXp = self.fieldX.copy()
-        self.fieldYp = self.fieldY.copy()
-
-        if instName[:4] == 'lsst' and pixelum == 10:  # falling on chip edge
-            self.fieldXp[19] += 0.004
-            self.fieldXp[22] -= 0.004
-
-        if debugLevel >= 3:
+        # Check the weighting ratio or not
+        if (debugLevel >= 3):
             print(self.w.shape)
             print(self.w)
 
-        aa = np.loadtxt('data/pssn_alpha.txt')
-        self.pssnAlpha = aa[:, 0]
-        # self.pssnRange = aa[: 1]
+        # Full width at half maximum (FWHM) related files
+        if (instName == self.LSST):
+            self.fwhmModelFileBase = os.path.join(aosDataDir, "fwhmModel", "fwhm_vs_z_500nm")
 
-        self.znx2 = np.zeros((self.nFieldp4, znwcs3))
-        self.stampD = 2**np.ceil(np.log2(opdSize))
+        # Field point for the point spread function (PSF)
+        self.fieldXp = self.fieldX.copy()
+        self.fieldYp = self.fieldY.copy()
+
+        # Add the offset (0.004 degree) for LSST wave front sensor (WFS)
+        if (instName == self.LSST) and (pixelum == 10):
+            self.fieldXp[19] += 0.004
+            self.fieldXp[22] -= 0.004
+
+        # Grt the alpha value of normalized point source sensitivity (PSSN)
+        # PSSN ~ 1 - a * delta^2 
+        # Eq (7.1) in Normalized Point Source Sensitivity for LSST (document-17242)
+        # It is noted that there are 19 terms of alpha value here for z3-z22 to use.
+        alphaData = np.loadtxt(os.path.join(aosDataDir, "pssn_alpha.txt"))
+        self.pssnAlpha = alphaData[:, 0]
 
         # Parameters
         self.GQFWHMeff = None
 
-    def getFWHMfromZ(self):
-        self.fwhm = np.zeros(self.nField)
+    def __getFieldCoor(self, instName):
+        """
+        
+        Get the position and related weighting defined on Gaussian quadrature plane.
+        
+        Arguments:
+            instName {[str]} -- Instrument name.
 
-    def getPSSNfromZ(self):
-        pass
+        Returns:
+            [ndarray] -- Weighting of points on Gaussian quadrature plane.
+            [int] -- Number of points on Gaussian quadrature plane.
+            [int] -- Number of points with wavefront sensor (WFS) on Gaussian quadrature plane.
+            [ndarray] -- Point x coordinate.
+            [ndarray] -- Point y coordinate.
+        """
 
-    def getFFTPSF(self, fftpsfoff, state, imagedelta, numproc,
-                  debugLevel, sensorfactor=1, fno=1.2335):
+        # Define the Gaussian quadrature plane
+        if (instName == self.LSST):
 
-        if not fftpsfoff:
-            argList = []
-            for i in range(self.nField):
-                opdFile = '%s/iter%d/sim%d_iter%d_opd%d.fits.gz' % (
-                    state.imageDir, state.iIter, state.iSim, state.iIter, i)
-                psfFile = opdFile.replace('opd', 'fftpsf')
-                argList.append((opdFile, state, imagedelta,
-                                sensorfactor, fno, psfFile,
-                                debugLevel))
-                if sys.platform == 'darwin':
-                    runFFTPSF(argList[i])
+            # The distance of point xi (used in Gaussian quadrature plane) to the origin
+            # This value is in [-1.75, 1.75]
+            armLen = [0.379, 0.841, 1.237, 1.535, 1.708]
 
-            if sys.platform != 'darwin':
-                # test, pdb cannot go into the subprocess
-                # runFFTPSF(argList[0])
-                pool = multiprocessing.Pool(numproc)
-                pool.map(runFFTPSF, argList)
-                pool.close()
-                pool.join()
+            # Weighting of point xi (used in Gaussian quadrature plane) for each ring
+            armW = [0.2369, 0.4786, 0.5689, 0.4786, 0.2369]
 
-            plt.figure(figsize=(10, 10))
-            for i in range(self.nField):
+            # Number of ring on Gaussian quadrature plane
+            nRing = len(armLen)
 
-                psfFile = '%s/iter%d/sim%d_iter%d_fftpsf%d.fits' % (
-                    state.imageDir, state.iIter, state.iSim, state.iIter, i)
-                # IHDU = fits.open(psfFile)
-                # psf = IHDU[0].data
-                # IHDU.close()
+            # Number of points on each ring
+            nArm = 6
 
-                psf = fits.getdata(psfFile)
+            # Field x, y for 4 WFS
+            fieldWFSx = [1.176, -1.176, -1.176, 1.176]
+            fieldWFSy = [1.176, 1.176, -1.176, -1.176]
 
-                if state.inst[:4] == 'lsst':
-                    if i == 0:
-                        pIdx = 1
-                    else:
-                        pIdx = i + self.nArm
-                    nRow = self.nRing + 1
-                    nCol = self.nArm
-                elif state.inst[:6] == 'comcam':
-                    aa = [7, 4, 1, 8, 5, 2, 9, 6, 3]
-                    pIdx = aa[i]
-                    nRow = 3
-                    nCol = 3
-                displaySize = 100
-                plt.subplot(nRow, nCol, pIdx)
-                plt.imshow(extractArray(psf, displaySize),
-                           origin='lower', interpolation='none')
-                plt.title('%d' % i)
-                plt.axis('off')
+            # Get the weighting for all field points (31 for lsst camera)
+            # Consider the first element is center (0)
+            # Do not understand to put the centeral point's wrighting as 0. Check with Bo. 
+            w = np.concatenate([np.zeros(1), np.kron(armW, np.ones(nArm))])
+            w = w/sum(w)
 
-            # plt.show()
-            pngFile = '%s/iter%d/sim%d_iter%d_fftpsf.png' % (
-                state.imageDir, state.iIter, state.iSim, state.iIter)
-            plt.savefig(pngFile, bbox_inches='tight')
-            plt.close()
+            # Number of field points with the adding of center point
+            nField = nArm*nRing + 1
 
-    def getPSSNandMore(self, pssnoff, state, numproc,
-                       debugLevel,
-                       outFile='', pixelum=0):
+            # Number of field points with the consideration of wavefront sensor
+            nFieldWfs = nField + len(fieldWFSx)
+
+            # Generate the fields point x, y coordinates
+            pointAngle = np.arange(nArm) * (2*np.pi)/nArm
+            fieldX = np.concatenate([np.zeros(1), np.kron(armLen, np.cos(pointAngle)), fieldWFSx])
+            fieldY = np.concatenate([np.zeros(1), np.kron(armLen, np.sin(pointAngle)), fieldWFSy])
+
+        # It looks like the weighting and position of Gaussian quardure plane here are just the 
+        # 1st order approximation. Check this with Bo. Do we need the further study?
+        elif (instName == self.ComCam):
+            
+            # ComCam is the cetral raft of LSST cam, which is composed of 3 x 3 CCDs.
+            nRow = 3
+            nCol = 3
+            
+            # Number of field points
+            nField = nRow*nCol
+
+            # Number of field points with the consideration of wavefront sensor
+            nFieldWfs = nField
+
+            # Get the weighting for all field points (9 for comcam)
+            w = np.ones(nField)
+            w = w / np.sum(w)
+
+            # Distance to raft center in degree along x/y direction and the related relative position
+            sensorD = 0.2347
+            coorComcam = sensorD * np.array([-1, 0 ,1])
+
+            # Generate the fields point x, y coordinates
+            fieldX = np.kron(coorComcam, np.ones(nRow))
+            fieldY = np.kron(np.ones(nCol), coorComcam)
+
+        return w, nField, nFieldWfs, fieldX, fieldY
+
+    def getPSSNandMore(self, pssnoff, state, numproc, outFile=None, pixelum=0, debugLevel=0):
+        
         """
         pixelum = 0: the input is opd map
         pixelum != 0: input is a fine-pixel PSF image stamp
         """
-        if not outFile:
+
+        # Redirect the path of output file if necessary
+        if (outFile is None):
             outFile = self.PSSNFile
 
+        # Calculate the PSSN
         if not pssnoff:
+
             # multithreading on MacOX doesn't work with pinv
             # before we calc_pssn, we do ZernikeFit to remove PTT
             # pinv appears in ZernikeFit()
-            if sys.platform == 'darwin':
+            
+            # Mac system
+            if (sys.platform == "darwin"):
                 self.PSSNw = np.zeros((self.nField, state.nOPDw))
+
             argList = []
             icount = 0
             for i in range(self.nField):
@@ -192,7 +200,7 @@ class aosMetric(object):
                             state.imageDir, state.iIter, state.iSim,
                             state.iIter,
                             i))
-                        
+
                     if state.nOPDw == 1:
                         inputFile.append(
                             '%s/iter%d/sim%d_iter%d_opd%d.fits.gz' % (
@@ -211,8 +219,9 @@ class aosMetric(object):
                     if sys.platform == 'darwin':
                         self.PSSNw[i, irun] = runPSSNandMore(argList[icount])
                     icount += 1
-                    
-            if sys.platform != 'darwin':
+
+            # Not the Mac system
+            if (sys.platform != "darwin"):
                 # test, pdb cannot go into the subprocess
                 # aa = runPSSNandMore(argList[0])
                 pool = multiprocessing.Pool(numproc)
@@ -235,24 +244,60 @@ class aosMetric(object):
             self.GQPSSN = np.sum(self.w * self.PSSN)
             self.GQFWHMeff = np.sum(self.w * self.FWHMeff)
             self.GQdm5 = np.sum(self.w * self.dm5)
+
             a1 = np.concatenate((self.PSSN, self.GQPSSN * np.ones(1)))
             a2 = np.concatenate((self.FWHMeff, self.GQFWHMeff * np.ones(1)))
             a3 = np.concatenate((self.dm5, self.GQdm5 * np.ones(1)))
+
             np.savetxt(outFile, np.vstack((a1, a2, a3)))
 
-            if debugLevel >= 2:
+            if (debugLevel >= 2):
                 print(self.GQPSSN)
-        else:
-            aa = np.loadtxt(outFile)
-            self.GQFWHMeff = aa[1, -1]  # needed for shiftGear
 
-    def getPSSNandMorefromBase(self, baserun, state):
-        if not os.path.isfile(self.PSSNFile):
-            baseFile = self.PSSNFile.replace(
-                'sim%d' % state.iSim, 'sim%d' % baserun)
-            os.link(baseFile, self.PSSNFile)
-        aa = np.loadtxt(self.PSSNFile)
-        self.GQFWHMeff = aa[1, -1]  # needed for shiftGear
+        else:
+            # Read the effective FWHM of Gaussian quadrature plane
+            # This is needed for the shiftGear in the control algorithm
+            self.setGQFWHMeff(loadFilePath=outFile)
+
+    def getPSSNandMorefromBase(self, baserun, iSim):
+        """
+        
+        Hard link the PSSN file to avoid the repeated calculation.
+        
+        Arguments:
+            baserun {[int]} -- Source simulation number (basement run).
+            iSim {[int]} -- Simulation number.
+        """
+
+        # Hard link the file to avoid the repeated calculation
+        hardLinkFile(self.PSSNFile, baserun, iSim)
+
+        # Read the effective FWHM of Gaussian quadrature plane
+        # This is needed for the shiftGear in the control algorithm
+        self.setGQFWHMeff(loadFilePath=self.PSSNFile)
+
+    def setGQFWHMeff(self, value=None, loadFilePath=None):
+        """
+        
+        Set the value of effective full width at half maximum (FWHM) on Gaussian quadrature plane.
+        
+        Keyword Arguments:
+            value {[ndarray]} -- Effective FWHM data. (default: {None})
+            loadFilePath {[str]} -- File contains the FWHM data. (default: {None})
+        
+        Raises:
+            ValueError -- One of inputs (value, loadFilePath) should be None.
+        """
+
+        if (value is not None) and (loadFilePath is not None):
+            raise ValueError("One of inputs (value, loadFilePath) should be None.")
+
+        if (value is not None):
+            self.GQFWHMeff = value
+
+        if (loadFilePath is not None):
+            data = np.loadtxt(loadFilePath)
+            self.GQFWHMeff = data[1, -1]
 
     def getEllipticity(self, ellioff, state, numproc,
                        debugLevel,
@@ -327,12 +372,18 @@ class aosMetric(object):
             if debugLevel >= 2:
                 print(self.GQelli)
 
-    def getEllipticityfromBase(self, baserun, state):
-        if not os.path.isfile(self.elliFile):
-            baseFile = self.elliFile.replace(
-                'sim%d' % state.iSim, 'sim%d' % baserun)
-            os.link(baseFile, self.elliFile)
+    def getEllipticityfromBase(self, baserun, iSim):
+        """
+        
+        Hard link the ellipticity file to avoid the repeated calculation.
+        
+        Arguments:
+            baserun {[int]} -- Source simulation number (basement run).
+            iSim {[int]} -- Simulation number.
+        """
 
+        # Hard link the file to avoid the repeated calculation
+        hardLinkFile(self.elliFile, baserun, iSim)
 
 def calc_pssn(array, wlum, type='opd', D=8.36, r0inmRef=0.1382, zen=0,
               pmask=0, imagedelta=0, fno=1.2335, debugLevel=0):
