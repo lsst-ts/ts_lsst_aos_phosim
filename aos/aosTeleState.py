@@ -1478,6 +1478,7 @@ def gridSamp(xf, yf, zf, innerR, outerR, resFile, nx, ny, plotFig=False):
     """
 
     # Do not understand the meaning for this map. Check with Bo.
+    # This function shall be rewritten and put into mirror class in the final.
 
     # Radial basis function approximation/interpolation of surface
     Ff = Rbf(xf, yf, zf)
