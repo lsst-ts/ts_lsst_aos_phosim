@@ -119,7 +119,6 @@ class aosController(object):
             self.mH = np.diag(self.Authority**2)
 
             # Update the matrix H for the strategy of "x0xcor"
-            # Check the strategy of "x0xcor" is needed or not with Bo. 
             if (self.xref == "x0xcor"):
 
                 # b3 of M1M3 bending, 10 is for the DOF of M2 and camera hexapod
@@ -129,16 +128,13 @@ class aosController(object):
                 idx2 = 10 + 20 + 5
 
                 # Update mH if M1M3 b3 and M2 b5 are both available
-                # Check with Bo for this idea. Do we need to keep this "x0xcor"?
+                # M1M3 b3 and M2 b5 are pretty similar (focus term). Surpress them to change at the same time.
                 if (esti.dofIdx[idx1] and esti.dofIdx[idx2]):
 
-                    # Do not understand this part.
-                    # Check with Bo the reason to do this.
                     idx1 = sum(esti.dofIdx[:idx1]) - 1
                     idx2 = sum(esti.dofIdx[:idx2]) - 1
 
-                    # 10 times penalty
-                    # Do not understand here. Check with Bo.
+                    # 10 times penalty. Experimental value.
                     self.mH[idx1, idx2] = self.Authority[idx1] * self.Authority[idx2] * 100
 
             # Calcualte the CCmat by diagonalizing the PSSN with unit of um

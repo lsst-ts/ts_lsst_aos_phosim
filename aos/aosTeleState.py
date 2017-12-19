@@ -33,9 +33,7 @@ class aosTeleState(object):
                "i": 0.754, "z": 0.868, "y": 0.973}
 
     # Gaussain quadrature (GQ) points xi
-    # Check the condition of "u", "z", and "y" with Bo. What is the meaning of place holder?
-    # Does that mean the analysis is not done yet? Or is the first order approximation good enough?
-    # The same question of weighting ratio of GQ for Bo.
+    # u, g, y band will be updated in the future.
     GQwave = {"u": [0.365], # place holder
               "g": [0.41826, 0.44901, 0.49371, 0.53752],
               "r": [0.55894, 0.59157, 0.63726, 0.68020],
@@ -44,7 +42,6 @@ class aosTeleState(object):
               "y": [0.973]} # place holder
 
     # Gaussian quadrature (GQ) weighting ratio
-    # Check with Bo for "u", "z", and "y"
     GQwt = {"u": [1],
             "g": [0.14436, 0.27745, 0.33694, 0.24125],
             "r": [0.15337, 0.28587, 0.33241, 0.22835],
@@ -142,8 +139,8 @@ class aosTeleState(object):
             self.zAngle = self.__getZenithAngleForIteration(self.zAngle, endIter, opSimHisDir=opSimHisDir)
 
         # Change the unit to arcsec
-        # Check with Bo for the original unit defined in GT.inst file because
-        # I do not understand the meaning of 1e-3 here
+        # Input unit is milli-arcsec in GT.inst.
+        # Check the document-17258.
         if (self.iqBudget is not None):
             self.iqBudget = self.iqBudget*1e-3
 
@@ -162,10 +159,8 @@ class aosTeleState(object):
         # Actuator ID in PhoSim
         # M2 z, x, y, rx, ry (5, 6, 7, 8, 9)
         # Cam z, x, y, rx, ry (10, 11, 12, 13, 14)
-        # M1M3 and M2 bending modes
-        # Check with Bo for the index of "nodfA" in PhoSim. It is wield if M1M3 and M2 have different
-        # bending modes. Does M1M3 begin from 15 and M2 begin from 35
-        # It looks like the index in PhoSim has been hardcoded based on writePertFile(). Check with Bo.
+        # M1M3 bending modes (15 - 34)
+        # M2 bending modes (35 - 54)
         phoSimStartIdx = 5
         self.phosimActuatorID = range(phoSimStartIdx, ndofA+phoSimStartIdx)
 
@@ -205,11 +200,11 @@ class aosTeleState(object):
             myu = (1 + 2*(np.random.rand(M1M3.nActuator) - 0.5)*self.M1M3ForceError)*LUTforce
 
             # Balance forces along z-axis
-            # Not sure this part. Need to check with Bo for the arangement of LUT force
+            # This statement is intentionally to make the force balance.
             myu[M1M3.nzActuator-1] = np.sum(LUTforce[:M1M3.nzActuator]) - np.sum(myu[:M1M3.nzActuator-1])
 
             # Balance forces along y-axis
-            # Not sure this part. Need to check with Bo for the arangement of LUT force
+            # This statement is intentionally to make the force balance.
             myu[M1M3.nActuator-1] = np.sum(LUTforce[M1M3.nzActuator:]) - np.sum(myu[M1M3.nzActuator:-1])
 
             # Get the net force along the z-axis
@@ -219,19 +214,17 @@ class aosTeleState(object):
             # It looks like there is the unit inconsistency between M1M3 and M2
             # This inconsistency comes from getPrintthz() in mirror. But I do not understand the condition
             # in M1M3 compared with M2.
-            # Check this with Bo.
-            # Suggeest to change the unit in aosM1M3 class at printthz_iter0() and G. Check with Bo.
+            # Suggeest to change the unit in aosM1M3 class at printthz_iter0() and G. 
+            # Will update the M1M3 (unit: m), M2 (unit: um), and camera (unit: mm) to make the unit to be 
+            # consistent later.
             self.M1M3surf = (M1M3.printthz_iter0 + M1M3.G.dot(myu - u0))*1e6
 
             # Set the mirror print along z direction of M2 in iteration 0
-            # When considering the update(), do we need this statement? Check with Bo.
             M2.setPrintthz_iter0(M2.getPrintthz(zenithAngle0))
-
-            # This value should be copy of M2.printthz_iter0.
             self.M2surf = M2.printthz_iter0.copy()
 
         # Do the temperature correction for mirror surface
-        # Need to check with Bo to put this in run-time change for continuing update temperature or not.
+        # Update this part to allow the run-time change in the later.
         if ((self.M1M3TBulk is not None) and (self.M1M3surf is not None)):
 
             self.M1M3surf += self.M1M3TBulk*M1M3.tbdz + self.M1M3TxGrad*M1M3.txdz \
@@ -248,13 +241,8 @@ class aosTeleState(object):
             self.M2surf = ct.M2CRS2ZCRS(0, 0, self.M2surf)[2]
 
         # Get the camera distortion
-        # Check with Bo that we need to allow the run time change of this variable or not.
-        # I believe the answer should be yes.
-        # This part may be removed
-        # It looks like only lsst camera will do the distortion correction. Is this true?
-        # Check this part with Bo.
+        # Allow the run time change of this in the future.
         if (self.camRot is not None):
-            # Check the inputs here with Bo.
             self.__getCamDistortionAll(simuParamDataDir, self.zAngle[0], 0, 0, 0)
 
     def __getZenithAngleForIteration(self, zAngle, endIter, opSimHisDir=None):
@@ -374,13 +362,11 @@ class aosTeleState(object):
                     self.time0 = Time(float(line.split()[1]), format="mjd")
 
                 # Budget of image quality
-                # Check with Bo how to define this
                 elif (line.startswith("iqBudget")):
                     # Read in mas, convert to arcsec (Check with Bo the meaning of "mas" here)
                     self.iqBudget = np.sqrt(np.sum(np.array(line.split()[1:], dtype=float)**2))
 
                 # Budget of ellipticity
-                # Check with Bo how to define this
                 elif (line.startswith("eBudget")):
                     self.eBudget = float(line.split()[1])
 
@@ -393,7 +379,7 @@ class aosTeleState(object):
                 elif (line.startswith("camTB") and self.inst == self.LSST):
                     self.camTB = float(line.split()[1])
 
-                    # Check with Bo how to get this compenstation of iqBudget
+                    # Update the budget of image quality
                     self.iqBudget = np.sqrt(self.iqBudget**2 + float(line.split()[3])**2)
 
                 # Camera rotation angle
@@ -661,14 +647,12 @@ class aosTeleState(object):
 
         # If the elevation angle changes, the print through maps need to change also.
         if (self.M1M3surf is not None):
-            # Check this statement with Bo. If there is the unit inconsistency in the initialization (* 1e6),
-            # there should be it here also.
 
-            # By the way, if considering the elevation angle change, the statement should be something like:
+            # If considering the elevation angle change, the statement should be something like:
             # if (self.iIter >= 1):
             #     self.M1M3surf += (M1M3.getPrintthz(self.zAngle[self.iIter]) - M1M3.getPrintthz(self.zAngle[self.iIter-1]))*1e6
 
-            self.M1M3surf += M1M3.getPrintthz(self.zAngle[self.iIter]) - M1M3.printthz_iter0
+            self.M1M3surf += (M1M3.getPrintthz(self.zAngle[self.iIter]) - M1M3.printthz_iter0)*1e6
 
         if (self.M2surf is not None):
             self.M2surf += M2.getPrintthz(self.zAngle[self.iIter]) - M2.printthz_iter0
@@ -687,7 +671,8 @@ class aosTeleState(object):
         """
 
         # List of camera distortion
-        # The first 5 types look like not to be used. Check with Bo.
+        # The first 5 types are not used in this moment. Just keep them now and will do the future study 
+        # to testify them.
         distTypeList = ["L1RB", "L2RB", "FRB", "L3RB", "FPRB",
                         "L1S1zer", "L2S1zer", "L3S1zer", "L1S2zer", "L2S2zer", "L3S2zer"]
         for distType in distTypeList:
