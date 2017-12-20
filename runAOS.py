@@ -197,7 +197,7 @@ def main(phosimDir, cwfsDir, outputDir, aosDataDir, algoFile="exp", cwfsModel="o
             state.getOPDAll(obsID, metr, args.numproc, wfs.znwcs, wfs.inst.obscuration, 
                             opdoff=args.opdoff, debugLevel=args.debugLevel)
 
-            metr.getPSSNandMore(args.pssnoff, state, args.numproc, debugLevel=args.debugLevel)
+            metr.getPSSNandMore(state, args.numproc, pssnoff=args.pssnoff, debugLevel=args.debugLevel)
             metr.getEllipticity(args.ellioff, state, args.numproc, args.debugLevel)
 
             if args.sensor not in ("ideal", "covM", "pass"):

@@ -80,6 +80,10 @@ class aosMetric(object):
         # Parameters
         self.GQFWHMeff = None
 
+        # File paths are assigned in aosTeleState class. Need to change this.
+        self.PSSNFile = None
+        self.elliFile = None
+
     def __getFieldCoor(self, instName):
         """
         
@@ -161,103 +165,129 @@ class aosMetric(object):
 
         return w, nField, nFieldWfs, fieldX, fieldY
 
-    def getPSSNandMore(self, pssnoff, state, numproc, outFile=None, pixelum=0, debugLevel=0):
-        
+    def getPSSNandMore(self, state, numproc, pssnoff=False, outPssnFile=None, pixelum=0, debugLevel=0):
         """
-        pixelum = 0: the input is opd map
-        pixelum != 0: input is a fine-pixel PSF image stamp
+        
+        Calculate the normalized point source sensitivity (PSSN), full width at half maximum (FWHM), and 
+        loss of limiting depth (dm5) for all field points.
+        
+        Arguments:
+            state {[aosTeleState]} -- aosTeleState object.
+            numproc {[int]} -- Number of processor.
+        
+        Keyword Arguments:
+            pssnoff {[bool]} -- Calculate the PSSN, FWHM, and dm5 or not. (default: {False})  
+            outPssnFile {[str]} -- Output file path. (default: {None})
+            pixelum {float} -- Pixel to um. If pixelum = 0. the input is OPD map. If pixelum != 0, the 
+                               input is a fine-pixel PSF image stamp. (default: {0})
+            debugLevel {int} -- Debug level. The higher value gives more information. (default: {0})
         """
 
-        # Redirect the path of output file if necessary
-        if (outFile is None):
-            outFile = self.PSSNFile
+        # Redirect the path of outPssnFile file if necessary
+        if (outPssnFile is None):
+            outPssnFile = self.PSSNFile
 
         # Calculate the PSSN
-        if not pssnoff:
+        if (not pssnoff):
 
-            # multithreading on MacOX doesn't work with pinv
-            # before we calc_pssn, we do ZernikeFit to remove PTT
+            # Multithreading on MacOX doesn't work with pinv
+            # Before we calc_pssn, we do ZernikeFit to remove PTT
             # pinv appears in ZernikeFit()
             
-            # Mac system
+            # Only for Mac system. The reason to declare the zero matix here is 
+            # because Mac does not support the parallel calculation here. Need to 
+            # solve this in the final.
             if (sys.platform == "darwin"):
-                self.PSSNw = np.zeros((self.nField, state.nOPDw))
+                PSSNw = np.zeros((self.nField, state.nOPDw))
 
             argList = []
-            icount = 0
-            for i in range(self.nField):
+            for ii in range(self.nField):
                 for irun in range(state.nOPDw):
-                    inputFile = []
-                    if pixelum > 0:
-                        inputFile.append(
-                            '%s/iter%d/sim%d_iter%d_psf%d.fits' % (
-                            state.imageDir, state.iIter, state.iSim,
-                            state.iIter,
-                            i))
-                    elif pixelum < 0:
-                        inputFile.append(
-                            '%s/iter%d/sim%d_iter%d_fftpsf%d.fits' % (
-                            state.imageDir, state.iIter, state.iSim,
-                            state.iIter,
-                            i))
 
-                    if state.nOPDw == 1:
-                        inputFile.append(
-                            '%s/iter%d/sim%d_iter%d_opd%d.fits.gz' % (
-                            state.imageDir, state.iIter, state.iSim,
-                            state.iIter, i))
+                    # Decide the wavelength in um
+                    if (state.nOPDw == 1):
                         wlum = state.wavelength
                     else:
-                        inputFile.append(
-                            '%s/iter%d/sim%d_iter%d_opd%d_w%d.fits.gz' % (
-                            state.imageDir, state.iIter, state.iSim,
-                            state.iIter, i, irun))
                         wlum = aosTeleState.GQwave[state.band][irun]
-                    argList.append((inputFile, state,
-                                        wlum, debugLevel, pixelum))
+                    
+                    # Input opd fits file
+                    inputFile = []
+                    if (state.nOPDw == 1):
+                        fileName = os.path.join(state.imageDir, "iter%d" % state.iIter, 
+                                    "sim%d_iter%d_opd%d.fits.gz" % (state.iSim, state.iIter, ii))
+                    
+                    else:
+                        fileName = os.path.join(state.imageDir, "iter%d" % state.iIter, 
+                                    "sim%d_iter%d_opd%d_w%d.fits.gz" % (state.iSim, state.iIter, ii, irun))
 
-                    if sys.platform == 'darwin':
-                        self.PSSNw[i, irun] = runPSSNandMore(argList[icount])
-                    icount += 1
+                    # Need to check to remove this list in the final.
+                    inputFile.append(fileName)
 
-            # Not the Mac system
+                    # Arguments to calculate the PSSN
+                    pssnArgs = (inputFile, state, wlum, debugLevel, pixelum)
+
+                    # Mac system
+                    if (sys.platform == "darwin"):
+                        PSSNw[ii, irun] = runPSSNandMore(pssnArgs)
+                    else:
+                        # Collect the arguments to do the parallel calculation on linux system
+                        argList.append(pssnArgs)                    
+
+            # Not the Mac system (e.g. Linux)
+            # Calculate the pssn by parallel calculation
             if (sys.platform != "darwin"):
-                # test, pdb cannot go into the subprocess
-                # aa = runPSSNandMore(argList[0])
                 pool = multiprocessing.Pool(numproc)
-                self.PSSNw = pool.map(runPSSNandMore, argList)
+                PSSNw = pool.map(runPSSNandMore, argList)
                 pool.close()
                 pool.join()
-                self.PSSNw = np.array(self.PSSNw).reshape(self.nField, -1)
+                PSSNw = np.array(PSSNw).reshape(self.nField, -1)
 
-            wt = np.tile(np.array(aosTeleState.GQwt[state.band]),
-                             (self.nField,1))
-            self.PSSN = np.sum(wt * self.PSSNw, axis=1)
-            self.FWHMeff = 1.086 * 0.6 * np.sqrt(1 / self.PSSN - 1)
-            self.dm5 = -1.25 * np.log10(self.PSSN)
+            # Repeat the weighting ratio of certain band by nField times on the axis-0 (row) 
+            wt = np.tile(np.array(aosTeleState.GQwt[state.band]), (self.nField, 1))
 
-            if debugLevel >= 2:
-                for i in range(self.nField):
-                    print('---field#%d, PSSN=%7.4f, FWHMeff = %5.0f mas' % (
-                        i, self.PSSN[i], self.FWHMeff[i] * 1e3))
+            # Calculate the effective PSSN by the Gaussian quardure (PSSN = sum(wi * f(xi)))
+            PSSN = np.sum(wt*PSSNw, axis=1)
 
-            self.GQPSSN = np.sum(self.w * self.PSSN)
-            self.GQFWHMeff = np.sum(self.w * self.FWHMeff)
-            self.GQdm5 = np.sum(self.w * self.dm5)
+            # Calculate the effective FWHM
+            # FWHMeff_sys = FWHMeff_atm * sqrt(1/PSSN - 1). FWHMeff_atm = 0.6 arcsec. 
+            # Another correction factor (eta = 1.086) is used to account for the difference between the 
+            # simple RSS and the more proper convolution.
+            # Follow page 7 (section 7.2 FWHM) in document-17242 for more information.
+            eta = 1.086
+            FWHMatm = 0.6
+            FWHMeff = eta*FWHMatm*np.sqrt(1/PSSN - 1)
 
-            a1 = np.concatenate((self.PSSN, self.GQPSSN * np.ones(1)))
-            a2 = np.concatenate((self.FWHMeff, self.GQFWHMeff * np.ones(1)))
-            a3 = np.concatenate((self.dm5, self.GQdm5 * np.ones(1)))
+            # Calculate dm5 (the loss of limiting depth)
+            # Check eq. (4.1) in page 4 in document-17242 for more information.
+            dm5 = -1.25 * np.log10(PSSN)
 
-            np.savetxt(outFile, np.vstack((a1, a2, a3)))
-
+            # Show the calculated PSSN and effective FWHM or not
             if (debugLevel >= 2):
-                print(self.GQPSSN)
+                for ii in range(self.nField):
+                    print("--- Field #%d, PSSN = %7.4f, FWHMeff = %5.0f mas." % (ii, PSSN[ii], FWHMeff[ii] * 1e3))
+
+            # Calculate the effective PSSN, FWHM, and dm5 on Gaussain quardure plane
+            GQPSSN = np.sum(self.w*PSSN)
+            GQdm5 = np.sum(self.w*dm5)
+            self.GQFWHMeff = np.sum(self.w*FWHMeff)
+
+            # Use the list of effective GQ values for the need of np.concatenate
+            allPssn = np.concatenate((PSSN, [GQPSSN]))
+            allFwhm = np.concatenate((FWHMeff, [self.GQFWHMeff]))
+            allDm5 = np.concatenate((dm5, [GQdm5]))
+
+            # Write the data into the file
+            np.savetxt(outPssnFile, np.vstack((allPssn, allFwhm, allDm5)))
+
+            # Show the effective PSSN on Gaussain quardure plane
+            if (debugLevel >= 2):
+                print(GQPSSN)
 
         else:
             # Read the effective FWHM of Gaussian quadrature plane
             # This is needed for the shiftGear in the control algorithm
-            self.setGQFWHMeff(loadFilePath=outFile)
+            self.setGQFWHMeff(loadFilePath=outPssnFile)
+
 
     def getPSSNandMorefromBase(self, baserun, iSim):
         """
@@ -320,18 +350,18 @@ class aosMetric(object):
             for i in range(self.nField):
                 for irun in range(state.nOPDw):
                     inputFile = []
-                    if pixelum > 0:
-                        inputFile.append(
-                            '%s/iter%d/sim%d_iter%d_psf%d.fits' % (
-                            state.imageDir, state.iIter, state.iSim,
-                            state.iIter,
-                            i))
-                    elif pixelum < 0:
-                        inputFile.append(
-                            '%s/iter%d/sim%d_iter%d_fftpsf%d.fits' % (
-                            state.imageDir, state.iIter, state.iSim,
-                            state.iIter,
-                            i))
+                    # if pixelum > 0:
+                    #     inputFile.append(
+                    #         '%s/iter%d/sim%d_iter%d_psf%d.fits' % (
+                    #         state.imageDir, state.iIter, state.iSim,
+                    #         state.iIter,
+                    #         i))
+                    # elif pixelum < 0:
+                    #     inputFile.append(
+                    #         '%s/iter%d/sim%d_iter%d_fftpsf%d.fits' % (
+                    #         state.imageDir, state.iIter, state.iSim,
+                    #         state.iIter,
+                    #         i))
 
                     if state.nOPDw == 1:
                         inputFile.append(
@@ -384,6 +414,10 @@ class aosMetric(object):
 
         # Hard link the file to avoid the repeated calculation
         hardLinkFile(self.elliFile, baserun, iSim)
+
+def analyzeOPD(self, state, numproc, inputFunc, analyzeOff=False, outFile=None, pixelum=0):
+    pass
+
 
 def calc_pssn(array, wlum, type='opd', D=8.36, r0inmRef=0.1382, zen=0,
               pmask=0, imagedelta=0, fno=1.2335, debugLevel=0):
