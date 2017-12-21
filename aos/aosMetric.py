@@ -58,10 +58,6 @@ class aosMetric(object):
             print(self.w.shape)
             print(self.w)
 
-        # Full width at half maximum (FWHM) related files
-        if (instName == self.LSST):
-            self.fwhmModelFileBase = os.path.join(aosDataDir, "fwhmModel", "fwhm_vs_z_500nm")
-
         # Field point for the point spread function (PSF)
         self.fieldXp = self.fieldX.copy()
         self.fieldYp = self.fieldY.copy()
@@ -412,7 +408,9 @@ def runPSSN(argList):
     opd = rmPTTfromOPD(inputFile[0], opdx, opdy)
 
     # Calculate the normalized point source sensitivity (PSSN)
-    pssn = calc_pssn(opd, wavelength, debugLevel=debugLevel)
+    # It is noted that the telecope zenith angle has the default value of 0. Do we need to update this?
+    # Check this with Bo.
+    pssn = calc_pssn(opd, wavelength, zen=0, debugLevel=debugLevel)
 
     return pssn
 
@@ -488,13 +486,13 @@ def rmPTTfromOPD(inputFile, opdx, opdy):
 
     return opd
 
-def calc_pssn(array, wlum, type='opd', D=8.36, r0inmRef=0.1382, zen=0,
+def calc_pssn(array, wlum, aType="opd", D=8.36, r0inmRef=0.1382, zen=0,
               pmask=0, imagedelta=0, fno=1.2335, debugLevel=0):
     """
     array: the array that contains either opd or pdf
            opd need to be in microns
     wlum: wavelength in microns
-    type: what is used to calculate pssn - either opd or psf
+    aType: what is used to calculate pssn - either opd or psf
     psf doesn't matter, will be normalized anyway
     D: side length of OPD image in meter
     r0inmRef: fidicial atmosphere r0@500nm in meter, Konstantinos uses 0.20
@@ -520,44 +518,63 @@ def calc_pssn(array, wlum, type='opd', D=8.36, r0inmRef=0.1382, zen=0,
        and take care of the coordinates properly.
     """
 
-    if array.ndim == 3:
+    # Check the type is "OPD" or "PSF"
+    if aType not in ("opd", "psf"):
+        raise ValueError("The type of %s is not allowed." % aType)
+
+    # Squeeze the array if necessary
+    if (array.ndim == 3):
         array2D = array[0, :, :].squeeze()
 
-    if type == 'opd':
+    # Get the k value (magnification ratio used in creating MTF)
+    if (aType == "opd"):
         try:
             m = max(array2D.shape)
         except NameError:
             m = max(array.shape)
         k = 1
-    else:
+    elif (aType == "psf"):
         m = max(pmask.shape)
-        # pupil needs to be padded k times larger to get imagedelta
-        k = fno * wlum / imagedelta
+        # Pupil needs to be padded k times larger to get imagedelta
+        # Do not know where to find this formular. Check with Bo.
+        k = fno*wlum/imagedelta
 
-    mtfa = createMTFatm(D, m, k, wlum, zen, r0inmRef)
+    # Get the modulation transfer function with the van Karman power spectrum
+    mtfa = createMTFatm(D, m, k, wlum, zen, r0inmRef, model="vonK")
 
-    if type == 'opd':
+    # Get the pupil function 
+    if (aType == "opd"):
         try:
             iad = (array2D != 0)
         except NameError:
             iad = (array != 0)
-    elif type == 'psf':
-        mk = int(m + np.rint((m * (k - 1) + 1e-5) / 2) * 2)  # add even number
-        iad = pmask  # padArray(pmask, m)
+    elif (aType == "psf"):
+        # Add even number
+        mk = int(m + np.rint((m * (k - 1) + 1e-5) / 2) * 2)
+        # padArray(pmask, m)
+        iad = pmask
 
-    # number of non-zero elements, used for normalization later
-    # miad2 = np.count_nonzero(iad)
-
-    # Perfect telescope
+    # OPD is zero for perfect telescope
     opdt = np.zeros((m, m))
-    psft = opd2psf(opdt, iad, wlum, imagedelta, 1, fno, debugLevel)
-    otft = psf2otf(psft)  # OTF of perfect telescope
-    otfa = otft * mtfa  # add atmosphere to perfect telescope
-    psfa = otf2psf(otfa)
-    pssa = np.sum(psfa**2)  # atmospheric PSS = 1/neff_atm
 
-    # Error;
-    if type == 'opd':
+    # OPD to PSF
+    psft = opd2psf(opdt, iad, wlum, imagedelta, 1, fno, debugLevel)
+    
+    # PSF to optical transfer function (OTF)
+    otft = psf2otf(psft)
+
+    # Add atmosphere to perfect telescope
+    otfa = otft * mtfa
+
+    # OTF to PSF
+    psfa = otf2psf(otfa)
+
+    # Atmospheric PSS = 1/neff_atm
+    pssa = np.sum(psfa**2)
+
+    # Calculate PSF of error
+    if (aType == "opd"):
+        
         if array.ndim == 2:
             ninst = 1
         else:
@@ -572,8 +589,11 @@ def calc_pssn(array, wlum, type='opd', D=8.36, r0inmRef=0.1382, zen=0,
                 psfe = psfei
             else:
                 psfe += psfei
+
         psfe = psfe / ninst
-    else:
+
+    elif (aType == "psf"):
+        
         if array.shape[0] == mk:
             psfe = array
         elif array.shape[0] > mk:
@@ -587,7 +607,9 @@ def calc_pssn(array, wlum, type='opd', D=8.36, r0inmRef=0.1382, zen=0,
         psfe = psfe / np.sum(psfe) * np.sum(psft)
 
     otfe = psf2otf(psfe)  # OTF of error
+
     otftot = otfe * mtfa  # add atmosphere to error
+
     psftot = otf2psf(otftot)
     pss = np.sum(psftot**2)  # atmospheric + error PSS
 
@@ -598,62 +620,139 @@ def calc_pssn(array, wlum, type='opd', D=8.36, r0inmRef=0.1382, zen=0,
     return pssn
 
 
-def createMTFatm(D, m, k, wlum, zen, r0inmRef):
+def createMTFatm(D, m, k, wlum, zen, r0inmRef, model="vonK"):
     """
-    m is the number of pixel we want to have to cover the length of D.
-    If we want a k-times bigger array, we pad the mtf generated using k=1.
+    
+    Generate the modulation transfer function (MTF) for atmosphere.
+    
+    Arguments:
+        D {[float]} -- Side length of optical path difference (OPD) image in m.
+        m {[int]} -- Dimension of OPD image in pixel. The the number of pixel we want to have 
+                     to cover the length of D.
+        k {[int]} -- Use a k-times bigger array to pad the MTF. Use k=1 for the same size.
+        wlum {[float]} -- Wavelength in um.
+        zen {[float]} -- Telescope zenith angle in degree.
+        r0inmRef {[float]} -- Reference r0 in meter at the wavelength of 0.5 um.
+    
+    Keyword Arguments:
+        model {str} -- Kolmogorov power spectrum ("Kolm") or van Karman power spectrum ("vonK"). 
+                       (default: {"vonK"})
+    
+    Returns:
+        [ndarray] -- MTF at specific atmosphere model.
     """
 
-    sfa = atmSF('vonK', D, m, wlum, zen, r0inmRef)
+    # Get the atmosphere phase structure function
+    sfa = atmSF(D, m, wlum, zen, r0inmRef, model)
+
+    # Get the modular transfer function for atmosphere
     mtfa = np.exp(-0.5 * sfa)
 
-    N = int(m + np.rint((m * (k - 1) + 1e-5) / 2) * 2)  # add even number
+    # Add even number
+    N = int(m + np.rint((m * (k - 1) + 1e-5) / 2) * 2)
+   
+    # Pad the matrix if necessary
     mtfa = padArray(mtfa, N)
 
     return mtfa
 
+def atmSF(D, m, wlum, zen, r0inmRef, model):
+    """
+    
+    Get the atmosphere phase structure function.
+    
+    Arguments:
+        D {[float]} -- Side length of optical path difference (OPD) image in m.
+        m {[int]} -- Dimension of OPD image in pixel.
+        wlum {[float]} -- Wavelength in um.
+        zen {[float]} -- Telescope zenith angle in degree.
+        r0inmRef {[float]} -- Reference r0 in meter at the wavelength of 0.5 um.
+        model {[str]} -- Kolmogorov power spectrum ("Kolm") or van Karman power spectrum ("vonK").
+    
+    Returns:
+        [ndarray] -- Atmosphere phase structure function.
+    
+    Raises:
+        ValueError -- The model type is not supported.
+    """
 
-def atmSF(model, D, m, wlum, zen, r0inmRef):
-    """
-    create the atmosphere phase structure function
-    model = 'Kolm'
-             = 'vonK'
-    """
+    # Check the model
+    if model not in ("Kolm", "vonK"):
+        raise ValueError("Does not support %s atmosphere model." % model)
+
+    # Get the atomosphere reference r0 in meter.
     r0a = r0Wz(r0inmRef, zen, wlum)
-    L0 = 30  # outer scale in meter, only used when model=vonK
 
+    # Round elements of the array to the nearest integer.
     m0 = np.rint(0.5 * (m + 1) + 1e-5)
+
+    # Get the x, y coordinates index
     aa = np.arange(1, m + 1)
     x, y = np.meshgrid(aa, aa)
 
-    dr = D / (m - 1)  # frequency resolution in 1/rad
+    # Frequency resolution in 1/rad
+    dr = D / (m - 1)
+
+    # Atmosphere r
     r = dr * np.sqrt((x - m0)**2 + (y - m0)**2)
 
-    if model == 'Kolm':
-        sfa = 6.88 * (r / r0a)**(5 / 3)
-    elif model == 'vonK':
-        sfa_c = 2 * sp.gamma(11 / 6) / 2**(5 / 6) / np.pi**(8 / 3) *\
-            (24 / 5 * sp.gamma(6 / 5))**(5 / 6) * (r0a / L0)**(-5 / 3)
-        # modified bessel of 2nd/3rd kind
-        sfa_k = sp.kv(5 / 6, (2 * np.pi / L0 * r))
-        sfa = sfa_c * (2**(-1 / 6) * sp.gamma(5 / 6) -
-                       (2 * np.pi / L0 * r)**(5 / 6) * sfa_k)
+    # Calculate the structure function
 
-        # if we don't do below, everything will be nan after ifft2
+    # Kolmogorov power spectrum
+    if (model == "Kolm"):
+        # D(r) = 6.88 * (r/r0)^(5/3) in p.117, Chap. 11 of PhoSim referece
+        sfa = 6.88 * (r / r0a)**(5 / 3)
+
+    # van Karman power spectrum
+    elif (model == "vonK"):
+
+        # Outer scale in meter
+        L0 = 30
+        
+        # Gamma function is used 
+        sfa_c = 2 * sp.gamma(11 / 6) / 2**(5 / 6) / np.pi**(8 / 3) *\
+                (24 / 5 * sp.gamma(6 / 5))**(5 / 6) * (r0a / L0)**(-5 / 3)
+       
+        # Modified bessel of 2nd/3rd kind
+        sfa_k = sp.kv(5 / 6, (2 * np.pi / L0 * r))
+        
+        sfa = sfa_c * (2**(-1 / 6) * sp.gamma(5 / 6) - (2 * np.pi / L0 * r)**(5 / 6) * sfa_k)
+
+        # If we don't do below, everything will be nan after ifft2
         # midp = r.shape[0]/2+1
         # 1e-2 is to avoid x.49999 be rounded to x
         midp = int(np.rint(0.5 * (r.shape[0] - 1) + 1e-2))
-        sfa[midp, midp] = 0  # at this single point, sfa_k=Inf, 0*Inf=Nan;
+
+        # At this single point, sfa_k=Inf, 0*Inf=Nan;
+        sfa[midp, midp] = 0
 
     return sfa
 
-
 def r0Wz(r0inmRef, zen, wlum):
-    zen = zen * np.pi / 180.  # telescope zenith angle, change here
-    r0aref = r0inmRef * np.cos(zen)**0.6  # atmosphere reference r0
-    r0a = r0aref * (wlum / 0.5)**1.2  # atmosphere r0, a function of wavelength
-    return r0a
+    """
+    
+    Get the atomosphere reference r0, which is a function of zenith angle and wavelength.
+    
+    Arguments:
+        r0inmRef {[float]} -- Reference r0 in meter at the wavelength of 0.5 um.
+        zen {[float]} -- Telescope zenith angle in degree.
+        wlum {[float]} -- Wavelength in um.
+    
+    Returns:
+        [float] -- Atomosphere reference r0 in meter.
+    """
 
+    # Telescope zenith angle, change the unit from degree to radian
+    zen = zen*np.pi/180
+
+    # Get the atmosphere reference r0
+    r0aref = r0inmRef * np.cos(zen)**0.6
+
+    # Atmosphere reference r0 at the specific wavelength in um
+    # 0.5 um is the reference wavelength
+    r0a = r0aref * (wlum / 0.5)**1.2
+    
+    return r0a
 
 def psf2eAtmW(array, wlum, type='opd', D=8.36, pmask=0, r0inmRef=0.1382,
               sensorFactor=1,
@@ -760,83 +859,124 @@ def createAtm(model, wlum, fwhminarcsec, gridsize, pixinum, oversample,
     return z
 
 
-def opd2psf(opd, pupil, wavelength, imagedelta, sensorFactor, fno, debugLevel):
+def opd2psf(opd, pupil, wavelength, imagedelta=0, sensorFactor=1, fno=1.2335, debugLevel=0):
     """
-    wavefront OPD in micron
-    imagedelta in micron, use 0 if pixel size is not specified
-    wavelength in micron
-
-    if pupil is a number, not an array, we will get pupil geometry from opd
-    The following are not needed if imagedelta=0,
-    sensorFactor, fno
+    
+    Optical path difference (OPD) to point spread function (PSF).
+    
+    Arguments:
+        opd {[ndarray]} -- Optical path difference.
+        pupil {[ndarray/ float/ int]} -- Pupil function. If pupil is a number, not an array, we will 
+                                         get pupil geometry from OPD.
+        wavelength {[float]} -- Wavelength in um.
+    
+    Keyword Arguments:
+        imagedelta {float} -- Pixel size in um. Use 0 if pixel size is not specified. (default: {0})
+        sensorFactor {float} -- Factor of sensor (check with Bo for this). (default: {1})
+        fno {float} -- ? Check with Bo. (default: {1.2335})
+        debugLevel {int} -- Debug level. The higher value gives more information. (default: {0})
+    
+    Returns:
+        [ndarray] -- Normalized PSF.
+    
+    Raises:
+        ValueError -- Shapes of OPD and pupil are different.
+        ValueError -- OPD shape is not square.
+        ValueError -- Padding value is less than 1.
     """
 
+    # Make sure all NaN in OPD to be 0
     opd[np.isnan(opd)] = 0
-    try:
-        if (pupil.shape == opd.shape):
-            pass
-        else:
-            raise AttributeError
-    except AttributeError:
+
+    # Get the pupil function from OPD if necessary
+    if (not isinstance(pupil, np.ndarray)):
         pupil = (opd != 0)
 
-    if imagedelta != 0:
-        try:
-            if opd.shape[0] != opd.shape[1]:
-                raise(nonSquareImageError)
-        except nonSquareImageError:
-            print('Error (opd2psf): Only square images are accepted.')
-            print('image size = (%d, %d)' % (
-                opd.shape[0], opd.shape[1]))
-            sys.exit()
+    # Check the dimension of pupil and OPD should be the same
+    if (opd.shape != pupil.shape):
+        raise ValueError("Shapes of OPD and pupil are different.")
 
-        k = fno * wavelength / imagedelta
-        padding = k / sensorFactor
-        try:
-            if padding < 1:
-                raise(psfSamplingTooLowError)
-        except psfSamplingTooLowError:
-            print('opd2psf: sampling too low, data inaccurate')
-            print('imagedelta needs to be smaller than fno*wlum=%4.2f um' % (
-                fno * wavelength))
-            print('         so that the padding factor > 1')
-            print('         otherwise we have to cut pupil to be < D')
-            sys.exit()
+    # For the PSF
+    if (imagedelta != 0):
+      
+        # Check the dimension of OPD
+        if (opd.shape[0] != opd.shape[1]):
+            raise ValueError("Error (opd2psf): OPD image size = (%d, %d)." % (opd.shape[0], opd.shape[1]))
 
+        # Get the k value and the padding
+        k = fno*wavelength/imagedelta
+        padding = k/sensorFactor
+
+        # Check the padding
+        if (padding < 1):
+
+            errorMes = "opd2psf: Sampling too low, data inaccurate.\n"
+            errorMes += "Imagedelta needs to be smaller than fno * wlum = %4.2f um.\n" % (fno*wavelength)
+            errorMes += "So that the padding factor > 1.\n"
+            errorMes += "Otherwise we have to cut pupil to be < D."
+
+            raise ValueError(errorMes)
+
+        # Size of sensor
         sensorSamples = opd.shape[0]
-        # add even number for padding
-        N = int(sensorSamples + \
-            np.rint(((padding - 1) * sensorSamples + 1e-5) / 2) * 2)
+
+        # Add even number for padding
+        N = int(sensorSamples + np.rint(((padding - 1) * sensorSamples + 1e-5) / 2) * 2)
         pupil = padArray(pupil, N)
         opd = padArray(opd, N)
-        if debugLevel >= 3:
-            print('padding=%8.6f' % padding)
-    # if imagedelta = 0, we don't do any padding, and go with below
-    z = pupil * np.exp(-2j * np.pi * opd / wavelength)
-    z = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(z),
-                                    s=z.shape))  # /sqrt(miad2/m^2)
-    z = np.absolute(z**2)
-    z = z / np.sum(z)
 
-    if debugLevel >= 3:
-        print('opd2psf(): imagedelta=%8.6f' % imagedelta, end='')
-        if imagedelta == 0:
-            print('0 means using OPD with padding as provided')
-        else:
-            print('')
-        print('verify psf has been normalized: %4.1f' % np.sum(z))
+        # Show the padding information or not
+        if (debugLevel >= 3):
+            print("padding = %8.6f." % padding)
+
+    # If imagedelta = 0, we don't do any padding, and go with below
+    z = pupil * np.exp(-2j * np.pi * opd / wavelength)
+    z = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(z), s=z.shape))
+    z = np.absolute(z**2)
+
+    # Normalize the PSF
+    z = z/np.sum(z)
+
+    # Show the information of PSF from OPD
+    if (debugLevel >= 3):
+        print("opd2psf(): imagedelta = %8.6f." % imagedelta, end="")
+
+        if (imagedelta == 0):
+            print("0 means using OPD with padding as provided.")
+        
+        print("Verify psf has been normalized: %4.1f." % np.sum(z))
 
     return z
 
-
 def psf2otf(psf):
-    otf = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(psf),
-                                      s=psf.shape))
+    """
+    
+    Point spread function (PSF) to optical transfer function (OTF).
+    
+    Arguments:
+        psf {[ndarray]} -- Point spread function.
+    
+    Returns:
+        [ndarray] -- Optacal transfer function.
+    """
+    
+    otf = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(psf), s=psf.shape))
+    
     return otf
 
-
 def otf2psf(otf):
-    psf = np.absolute(np.fft.fftshift(np.fft.ifft2(np.fft.fftshift(otf),
-                                                   s=otf.shape)))
+    """
+    
+    Optical transfer function (OTF) to point spread function (PSF.
+    
+    Arguments:
+        otf {[ndarray]} -- Optical transfer function.
+    
+    Returns:
+        [ndarray] -- Point spread function.
+    """
+
+    psf = np.absolute(np.fft.fftshift(np.fft.ifft2(np.fft.fftshift(otf), s=otf.shape)))
+
     return psf
 
