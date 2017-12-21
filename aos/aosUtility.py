@@ -974,6 +974,22 @@ def getMirrorRes(surf, x, y, n, zlistFile=None):
 
     return res
 
+def feval(func, vars=()):
+    """
+    
+    Evaluate the function.
+    
+    Arguments:
+        func {[object]} -- Function to evaluate.
+    
+    Keyword Arguments:
+        vars {tuple} -- Inputs of function (default: {()}).
+    
+    Returns:
+        [double] -- Output of evaluated function.
+    """
+    return eval("func")(*vars)
+
 if __name__ == "__main__":
 
     uk = np.arange(50)

@@ -20,9 +20,10 @@ from lsst.cwfs.errors import nonSquareImageError
 from aos.aosErrors import psfSamplingTooLowError
 from aos.aosTeleState import aosTeleState
 
+
 import matplotlib.pyplot as plt
 
-from aos.aosUtility import getInstName, hardLinkFile
+from aos.aosUtility import getInstName, hardLinkFile, feval
 
 
 class aosMetric(object):
@@ -165,7 +166,102 @@ class aosMetric(object):
 
         return w, nField, nFieldWfs, fieldX, fieldY
 
-    def getPSSNandMore(self, state, numproc, pssnoff=False, outPssnFile=None, pixelum=0, debugLevel=0):
+    def getPSSNandMorefromBase(self, baserun, iSim):
+        """
+        
+        Hard link the PSSN file to avoid the repeated calculation.
+        
+        Arguments:
+            baserun {[int]} -- Source simulation number (basement run).
+            iSim {[int]} -- Simulation number.
+        """
+
+        # Hard link the file to avoid the repeated calculation
+        hardLinkFile(self.PSSNFile, baserun, iSim)
+
+        # Read the effective FWHM of Gaussian quadrature plane
+        # This is needed for the shiftGear in the control algorithm
+        self.setGQFWHMeff(loadFilePath=self.PSSNFile)
+
+    def getEllipticityfromBase(self, baserun, iSim):
+        """
+        
+        Hard link the ellipticity file to avoid the repeated calculation.
+        
+        Arguments:
+            baserun {[int]} -- Source simulation number (basement run).
+            iSim {[int]} -- Simulation number.
+        """
+
+        # Hard link the file to avoid the repeated calculation
+        hardLinkFile(self.elliFile, baserun, iSim)
+
+    def setGQFWHMeff(self, value=None, loadFilePath=None):
+        """
+        
+        Set the value of effective full width at half maximum (FWHM) on Gaussian quadrature plane.
+        
+        Keyword Arguments:
+            value {[ndarray]} -- Effective FWHM data. (default: {None})
+            loadFilePath {[str]} -- File contains the FWHM data. (default: {None})
+        
+        Raises:
+            ValueError -- One of inputs (value, loadFilePath) should be None.
+        """
+
+        if (value is not None) and (loadFilePath is not None):
+            raise ValueError("One of inputs (value, loadFilePath) should be None.")
+
+        if (value is not None):
+            self.GQFWHMeff = value
+
+        if (loadFilePath is not None):
+            data = np.loadtxt(loadFilePath)
+            self.GQFWHMeff = data[1, -1]
+
+    def getEllipticity(self, state, ellioff=False, outElliFile=None, debugLevel=0):
+        """
+        
+        Calculate the ellipticity for all field points.
+        
+        Arguments:
+            state {[aosTeleState]} -- aosTeleState object.
+        
+        Keyword Arguments:
+            ellioff {[bool]} -- Calculate the ellipticity or not. (default: {False})
+            outElliFile {[str]} -- Output file path. (default: {None})
+            debugLevel {int} -- Debug level. The higher value gives more information. (default: {0})
+        """
+
+        # Redirect the path of outPssnFile file if necessary
+        if (outElliFile is None):
+            outElliFile = self.elliFile
+
+        # Calculate the ellipticity
+        if (not ellioff):
+
+            # Calculate the effective ellipticity
+            elli = self.__analyzeOPD(state.imageDir, state.iSim, state.iIter, state.nOPDw, 
+                                     state.wavelength, state.band, runEllipticity, 
+                                     funcArgs=(state.opdx, state.opdy, debugLevel))
+
+            # Show the calculated ellipticity or not
+            for ii in range(self.nField):
+                if (debugLevel >= 2):
+                    print("--- Field #%d, elli = %7.4f." % (ii, elli[ii]))
+
+            # Calculate the effective ellipticity on Gaussain quardure plane
+            GQelli = np.sum(self.w*elli)
+
+            # Use the list of effective GQ values for the need of np.concatenate
+            a1 = np.concatenate((elli, [GQelli]))
+            np.savetxt(outElliFile, a1)
+
+            # Show the effective ellipticity on Gaussain quardure plane
+            if (debugLevel >= 2):
+                print(GQelli)
+
+    def getPSSNandMore(self, state, pssnoff=False, outPssnFile=None, debugLevel=0):
         """
         
         Calculate the normalized point source sensitivity (PSSN), full width at half maximum (FWHM), and 
@@ -173,13 +269,10 @@ class aosMetric(object):
         
         Arguments:
             state {[aosTeleState]} -- aosTeleState object.
-            numproc {[int]} -- Number of processor.
         
         Keyword Arguments:
-            pssnoff {[bool]} -- Calculate the PSSN, FWHM, and dm5 or not. (default: {False})  
+            pssnoff {[bool]} -- Calculate the PSSN, FWHM, and dm5 or not. (default: {False})
             outPssnFile {[str]} -- Output file path. (default: {None})
-            pixelum {float} -- Pixel to um. If pixelum = 0. the input is OPD map. If pixelum != 0, the 
-                               input is a fine-pixel PSF image stamp. (default: {0})
             debugLevel {int} -- Debug level. The higher value gives more information. (default: {0})
         """
 
@@ -190,63 +283,10 @@ class aosMetric(object):
         # Calculate the PSSN
         if (not pssnoff):
 
-            # Multithreading on MacOX doesn't work with pinv
-            # Before we calc_pssn, we do ZernikeFit to remove PTT
-            # pinv appears in ZernikeFit()
-            
-            # Only for Mac system. The reason to declare the zero matix here is 
-            # because Mac does not support the parallel calculation here. Need to 
-            # solve this in the final.
-            if (sys.platform == "darwin"):
-                PSSNw = np.zeros((self.nField, state.nOPDw))
-
-            argList = []
-            for ii in range(self.nField):
-                for irun in range(state.nOPDw):
-
-                    # Decide the wavelength in um
-                    if (state.nOPDw == 1):
-                        wlum = state.wavelength
-                    else:
-                        wlum = aosTeleState.GQwave[state.band][irun]
-                    
-                    # Input opd fits file
-                    inputFile = []
-                    if (state.nOPDw == 1):
-                        fileName = os.path.join(state.imageDir, "iter%d" % state.iIter, 
-                                    "sim%d_iter%d_opd%d.fits.gz" % (state.iSim, state.iIter, ii))
-                    
-                    else:
-                        fileName = os.path.join(state.imageDir, "iter%d" % state.iIter, 
-                                    "sim%d_iter%d_opd%d_w%d.fits.gz" % (state.iSim, state.iIter, ii, irun))
-
-                    # Need to check to remove this list in the final.
-                    inputFile.append(fileName)
-
-                    # Arguments to calculate the PSSN
-                    pssnArgs = (inputFile, state, wlum, debugLevel, pixelum)
-
-                    # Mac system
-                    if (sys.platform == "darwin"):
-                        PSSNw[ii, irun] = runPSSNandMore(pssnArgs)
-                    else:
-                        # Collect the arguments to do the parallel calculation on linux system
-                        argList.append(pssnArgs)                    
-
-            # Not the Mac system (e.g. Linux)
-            # Calculate the pssn by parallel calculation
-            if (sys.platform != "darwin"):
-                pool = multiprocessing.Pool(numproc)
-                PSSNw = pool.map(runPSSNandMore, argList)
-                pool.close()
-                pool.join()
-                PSSNw = np.array(PSSNw).reshape(self.nField, -1)
-
-            # Repeat the weighting ratio of certain band by nField times on the axis-0 (row) 
-            wt = np.tile(np.array(aosTeleState.GQwt[state.band]), (self.nField, 1))
-
-            # Calculate the effective PSSN by the Gaussian quardure (PSSN = sum(wi * f(xi)))
-            PSSN = np.sum(wt*PSSNw, axis=1)
+            # Calculate the effective PSSN
+            PSSN = self.__analyzeOPD(state.imageDir, state.iSim, state.iIter, state.nOPDw, 
+                                     state.wavelength, state.band, runPSSN, 
+                                     funcArgs=(state.opdx, state.opdy, debugLevel))
 
             # Calculate the effective FWHM
             # FWHMeff_sys = FWHMeff_atm * sqrt(1/PSSN - 1). FWHMeff_atm = 0.6 arcsec. 
@@ -288,136 +328,165 @@ class aosMetric(object):
             # This is needed for the shiftGear in the control algorithm
             self.setGQFWHMeff(loadFilePath=outPssnFile)
 
-
-    def getPSSNandMorefromBase(self, baserun, iSim):
+    def __analyzeOPD(self, imageDir, iSim, iIter, nOPDw, wavelength, band, func, funcArgs=()):
         """
         
-        Hard link the PSSN file to avoid the repeated calculation.
+        Analyze the optical path difference (OPD) based on the specified function.
         
         Arguments:
-            baserun {[int]} -- Source simulation number (basement run).
+            imageDir {[str]} -- Directory to OPD images.
             iSim {[int]} -- Simulation number.
-        """
-
-        # Hard link the file to avoid the repeated calculation
-        hardLinkFile(self.PSSNFile, baserun, iSim)
-
-        # Read the effective FWHM of Gaussian quadrature plane
-        # This is needed for the shiftGear in the control algorithm
-        self.setGQFWHMeff(loadFilePath=self.PSSNFile)
-
-    def setGQFWHMeff(self, value=None, loadFilePath=None):
-        """
-        
-        Set the value of effective full width at half maximum (FWHM) on Gaussian quadrature plane.
+            iIter {[int]} -- Iteration number.
+            nOPDw {[int]} -- Number of weighting ratio of specific band on Gaussian quardure.
+            wavelength {[float]} -- Monochromatic light wavelength.
+            band {[str]} -- Active filter band.
+            func {[obj]} -- Function object to analyze the OPD.
         
         Keyword Arguments:
-            value {[ndarray]} -- Effective FWHM data. (default: {None})
-            loadFilePath {[str]} -- File contains the FWHM data. (default: {None})
+            funcArgs {tuple} -- Arguments needed for func to use. (default: {()})
         
-        Raises:
-            ValueError -- One of inputs (value, loadFilePath) should be None.
-        """
-
-        if (value is not None) and (loadFilePath is not None):
-            raise ValueError("One of inputs (value, loadFilePath) should be None.")
-
-        if (value is not None):
-            self.GQFWHMeff = value
-
-        if (loadFilePath is not None):
-            data = np.loadtxt(loadFilePath)
-            self.GQFWHMeff = data[1, -1]
-
-    def getEllipticity(self, ellioff, state, numproc,
-                       debugLevel,
-                       outFile='', pixelum=0):
-        """
-        pixelum = 0: the input is opd map
-        pixelum != 0: input is a fine-pixel PSF image stamp
-        """
-        if not outFile:
-            outFile = self.elliFile
-
-        if not ellioff:
-            # multithreading on MacOX doesn't work with pinv
-            # before we psf2eAtmW(), we do ZernikeFit to remove PTT
-            # pinv appears in ZernikeFit()
-            if sys.platform == 'darwin':
-                self.elliw = np.zeros((self.nField, state.nOPDw))
-            argList = []
-            icount = 0
-            for i in range(self.nField):
-                for irun in range(state.nOPDw):
-                    inputFile = []
-                    # if pixelum > 0:
-                    #     inputFile.append(
-                    #         '%s/iter%d/sim%d_iter%d_psf%d.fits' % (
-                    #         state.imageDir, state.iIter, state.iSim,
-                    #         state.iIter,
-                    #         i))
-                    # elif pixelum < 0:
-                    #     inputFile.append(
-                    #         '%s/iter%d/sim%d_iter%d_fftpsf%d.fits' % (
-                    #         state.imageDir, state.iIter, state.iSim,
-                    #         state.iIter,
-                    #         i))
-
-                    if state.nOPDw == 1:
-                        inputFile.append(
-                            '%s/iter%d/sim%d_iter%d_opd%d.fits.gz' % (
-                            state.imageDir, state.iIter, state.iSim,
-                            state.iIter, i))
-                        wlum = state.wavelength
-                    else:
-                        inputFile.append(
-                            '%s/iter%d/sim%d_iter%d_opd%d_w%d.fits.gz' % (
-                            state.imageDir, state.iIter, state.iSim,
-                            state.iIter, i, irun))
-                        wlum = aosTeleState.GQwave[state.band][irun]
-                    argList.append((inputFile, state,
-                                    wlum, debugLevel, pixelum))
-
-                    if sys.platform == 'darwin':
-                        self.elliw[i, irun] = runEllipticity(argList[icount])
-                    icount += 1
-
-            if sys.platform != 'darwin':
-                pool = multiprocessing.Pool(numproc)
-                self.elliw = pool.map(runEllipticity, argList)
-                pool.close()
-                pool.join()
-                self.elliw = np.array(self.elliw).reshape(self.nField, -1)
-
-            wt = np.tile(np.array(aosTeleState.GQwt[state.band]),
-                             (self.nField,1))
-            self.elli = np.sum(wt * self.elliw, axis = 1)
-            for i in range(self.nField):
-                if debugLevel >= 2:
-                    print('---field#%d, elli=%7.4f' % (i, self.elli[i]))
-
-            self.GQelli = np.sum(self.w * self.elli)
-            a1 = np.concatenate((self.elli, self.GQelli * np.ones(1)))
-            np.savetxt(outFile, a1)
-            if debugLevel >= 2:
-                print(self.GQelli)
-
-    def getEllipticityfromBase(self, baserun, iSim):
+        Returns:
+            [ndarray] -- Result by the function on Gaussian quardure.
         """
         
-        Hard link the ellipticity file to avoid the repeated calculation.
-        
-        Arguments:
-            baserun {[int]} -- Source simulation number (basement run).
-            iSim {[int]} -- Simulation number.
-        """
+        outputW = np.zeros((self.nField, nOPDw))
+        for ii in range(self.nField):
+            for irun in range(nOPDw):
 
-        # Hard link the file to avoid the repeated calculation
-        hardLinkFile(self.elliFile, baserun, iSim)
+                # Decide the wavelength in um
+                if (nOPDw == 1):
+                    wlum = wavelength
+                else:
+                    wlum = aosTeleState.GQwave[band][irun]
+                
+                # Input opd fits file
+                if (nOPDw == 1):
+                    inputFile = os.path.join(imageDir, "iter%d" % iIter, 
+                                "sim%d_iter%d_opd%d.fits.gz" % (iSim, iIter, ii))
+                
+                else:
+                    inputFile = os.path.join(imageDir, "iter%d" % iIter, 
+                                "sim%d_iter%d_opd%d_w%d.fits.gz" % (iSim, iIter, ii, irun))
 
-def analyzeOPD(self, state, numproc, inputFunc, analyzeOff=False, outFile=None, pixelum=0):
-    pass
+                # Arguments to do the calculation
+                # Use the list to make the args to be iterable for feval() to use.
+                args = [([inputFile], wlum, ) + funcArgs]
 
+                # Calculate the value based on the specified function
+                outputW[ii, irun] = feval(func, vars=args)
+
+        # Repeat the weighting ratio of certain band by nField times on the axis-0 (row) 
+        wt = np.tile(np.array(aosTeleState.GQwt[band]), (self.nField, 1))
+
+        # Calculate the effective output on the Gaussian quardure plane 
+        # Int f(x)dx in [-1, 1] = sum(wi * f(xi)) for all i 
+        output = np.sum(wt*outputW, axis=1)
+
+        return output
+
+def runPSSN(argList):
+    """
+    
+    Calculate the normalized point source sensitivity (PSSN) based on the optical path 
+    difference (OPD) map.
+    
+    Arguments:
+        argList {[tuple]} -- Arguments to do the calculation.
+    
+    Returns:
+        [ndarray] -- Calculated PSSN.
+    """
+
+    # List of parameters
+    inputFile = argList[0]
+    wavelength = argList[1]
+    opdx = argList[2]
+    opdy = argList[3]
+    debugLevel = argList[4]
+
+    # Show the input file or not
+    if (debugLevel >=2):
+        print("runPSSN: %s." % inputFile)
+
+    # Remove the affection of piston (z1), x-tilt (z2), and y-tilt (z3) from OPD map.
+    opd = rmPTTfromOPD(inputFile[0], opdx, opdy)
+
+    # Calculate the normalized point source sensitivity (PSSN)
+    pssn = calc_pssn(opd, wavelength, debugLevel=debugLevel)
+
+    return pssn
+
+def runEllipticity(argList):
+    """
+    
+    Calculate the ellipticity based on the optical path difference (OPD) map.
+    
+    Arguments:
+        argList {[tuple]} -- Arguments to do the calculation.
+    
+    Returns:
+        [ndarray] -- Calculated ellipticity.
+    """
+
+    # List of parameters
+    inputFile = argList[0]
+    wavelength = argList[1]
+    opdx = argList[2]
+    opdy = argList[3]    
+    debugLevel = argList[4]
+
+    # Show the input file or not
+    if (debugLevel >= 2):
+        print("runEllipticity: %s." % inputFile)
+
+    # Remove the affection of piston (z1), x-tilt (z2), and y-tilt (z3) from OPD map.
+    opd = rmPTTfromOPD(inputFile[0], opdx, opdy)
+
+    # Calculate the ellipticity
+    elli = psf2eAtmW(opd, wavelength, debugLevel=debugLevel)[0]
+
+    return elli
+
+def rmPTTfromOPD(inputFile, opdx, opdy):
+    """
+    
+    Remove the afftection of piston (z1), x-tilt (z2), and y-tilt (z3) from the optical 
+    map difference (OPD) map.
+    
+    Arguments:
+        inputFile {[str]} -- OPD file path.
+        opdx {[ndarray]} -- x positions of OPD map.
+        opdy {[ndarray]} -- y positions of OPD map.
+    
+    Returns:
+        [ndarray] -- OPD map after removing the affection of z1-z3.
+    """
+
+    # Before calc_pssn,
+    # (1) Remove PTT (piston, x-tilt, y-tilt),
+    # (2) Make sure outside of pupil are all zeros
+
+    # Get the optical path difference (OPD) image data
+    opd = fits.getdata(inputFile)
+
+    # Find the index that the value of OPD is not 0
+    idx = (opd != 0)
+
+    # Do the annular Zernike fitting for the OPD map
+    # Only fit the first three terms (z1-z3): piston, x-tilt, y-tilt
+    # Do not understand why using the obscuration = 0 here. The OPD map does not look like this.
+    # Check this obs=0 with Bo.
+    # It might have no affection. Check with Bo.
+    Z = ZernikeAnnularFit(opd[idx], opdx[idx], opdy[idx], 3, 0)
+    
+    # Make sure all valls after z4
+    # Check to remove this
+    Z[3:] = 0
+    
+    # Remove the PTT
+    opd[idx] -= ZernikeAnnularEval(Z, opdx[idx], opdy[idx], 0)
+
+    return opd
 
 def calc_pssn(array, wlum, type='opd', D=8.36, r0inmRef=0.1382, zen=0,
               pmask=0, imagedelta=0, fno=1.2335, debugLevel=0):
@@ -770,142 +839,4 @@ def otf2psf(otf):
     psf = np.absolute(np.fft.fftshift(np.fft.ifft2(np.fft.fftshift(otf),
                                                    s=otf.shape)))
     return psf
-
-
-def runEllipticity(argList):
-    inputFile = argList[0]
-    opdx = argList[1].opdx
-    opdy = argList[1].opdy
-    wavelength = argList[2]
-    debugLevel = argList[3]
-    pixelum = np.abs(argList[4])
-    print('runEllipticity: %s ' % inputFile)
-
-    if pixelum == 0:
-        # IHDU = fits.open(inputFile[0])
-        # opd = IHDU[0].data  # um
-        # IHDU.close()
-
-        opd = fits.getdata(inputFile[0])
-
-        # before psf2eAtmW()
-        # (1) remove PTT,
-        # (2) make sure outside of pupil are all zeros
-        idx = (opd != 0)
-        Z = ZernikeAnnularFit(opd[idx], opdx[idx], opdy[idx], 3, 0)
-        Z[3:] = 0
-        opd[idx] -= ZernikeAnnularEval(Z, opdx[idx], opdy[idx], 0)
-
-        elli, _, _, _ = psf2eAtmW(
-            opd, wavelength, debugLevel=debugLevel)
-    else:
-        # IHDU = fits.open(inputFile[0])
-        # psf = IHDU[0].data  # unit: um
-        # IHDU.close()
-
-        psf = fits.getdata(inputFile[0])
-
-        # opd only needed to help determine how big mtfa needs to be
-        # IHDU = fits.open(inputFile[1])
-        # opd = IHDU[0].data  # unit: um
-        # IHDU.close()
-
-        opd = fits.getdata(inputFile[1])
-
-        iad = (opd != 0)
-
-        elli, _, _, _ = psf2eAtmW(
-            psf, wavelength, type='psf', pmask=iad,
-            imagedelta=pixelum, debugLevel=debugLevel)
-
-    return elli
-
-
-def runPSSNandMore(argList):
-    """
-    pixelum = 0 means we use opd, meanwhile only opd is provided.
-    pixelum !=0 means we use psf. both psf and pmask needs to be provided.
-    """
-
-    inputFile = argList[0]
-    opdx = argList[1].opdx
-    opdy = argList[1].opdy
-    wavelength = argList[2]
-    debugLevel = argList[3]
-    pixelum = np.abs(argList[4])
-    print('runPSSNandMore: %s ' % inputFile)
-
-    if pixelum == 0:
-        # IHDU = fits.open(inputFile[0])
-        # opd = IHDU[0].data  # unit: um
-        # IHDU.close()
-
-        opd = fits.getdata(inputFile[0])
-
-        # before calc_pssn,
-        # (1) remove PTT,
-        # (2) make sure outside of pupil are all zeros
-        idx = (opd != 0)
-        Z = ZernikeAnnularFit(opd[idx], opdx[idx], opdy[idx], 3, 0)
-        Z[3:] = 0
-        opd[idx] -= ZernikeAnnularEval(Z, opdx[idx], opdy[idx], 0)
-
-        pssn = calc_pssn(opd, wavelength, debugLevel=debugLevel)
-    else:
-        # IHDU = fits.open(inputFile[0])
-        # psf = IHDU[0].data  # unit: um
-        # IHDU.close()
-
-        psf = fits.getdata(inputFile[0])
-
-        # opd only needed to help determine pupil geometry
-        # IHDU = fits.open(inputFile[1])
-        # opd = IHDU[0].data  # unit: um
-        # IHDU.close()
-
-        opd = fits.getdata(inputFile[1])
-
-        iad = (opd != 0)
-
-        pssn = calc_pssn(psf, wavelength, type='psf', pmask=iad,
-                         imagedelta=pixelum,
-                         debugLevel=debugLevel)
-
-    return pssn
-
-
-def runFFTPSF(argList):
-    opdFile = argList[0]
-    opdx = argList[1].opdx
-    opdy = argList[1].opdy
-    wavelength = argList[1].effwave
-    imagedelta = argList[2]
-    sensorfactor = argList[3]
-    fno = argList[4]
-    psfFile = argList[5]
-    debugLevel = argList[6]
-    print('runFFTPSF: %s ' % opdFile)
-
-    # IHDU = fits.open(opdFile)
-    # opd = IHDU[0].data  # unit: um
-    # IHDU.close()
-
-    opd = fits.getdata(opdFile)
-
-    # before opd2psf,
-    # (1) remove PTT, (for consistence with calc_pssn,
-    #        in principle doesn't matter,
-    # in practice, this affects centering, so it affects edge cutoff on psf)
-    # (2) make sure outside of pupil are all zeros
-    idx = (opd != 0)
-    Z = ZernikeAnnularFit(opd[idx], opdx[idx], opdy[idx], 3, 0)
-    Z[3:] = 0
-    opd[idx] -= ZernikeAnnularEval(Z, opdx[idx], opdy[idx], 0)
-
-    psf = opd2psf(opd, 0, wavelength, imagedelta, sensorfactor,
-                  fno, debugLevel)
-    if os.path.isfile(psfFile):
-        os.remove(psfFile)
-    hdu = fits.PrimaryHDU(psf)
-    hdu.writeto(psfFile)
 
