@@ -4,27 +4,14 @@
 # @       Large Synoptic Survey Telescope
 
 import os
-import sys
-import multiprocessing
-
 import numpy as np
 import scipy.special as sp
 from astropy.io import fits
 
-from lsst.cwfs.tools import padArray
-from lsst.cwfs.tools import extractArray
-from lsst.cwfs.tools import ZernikeAnnularFit
-from lsst.cwfs.tools import ZernikeAnnularEval
-from lsst.cwfs.errors import nonSquareImageError
+from lsst.cwfs.tools import padArray, extractArray, ZernikeAnnularFit, ZernikeAnnularEval
 
-from aos.aosErrors import psfSamplingTooLowError
 from aos.aosTeleState import aosTeleState
-
-
-import matplotlib.pyplot as plt
-
 from aos.aosUtility import getInstName, hardLinkFile, feval
-
 
 class aosMetric(object):
 
@@ -417,7 +404,7 @@ def runPSSN(argList):
 def runEllipticity(argList):
     """
     
-    Calculate the ellipticity based on the optical path difference (OPD) map.
+    Get the ellipticity based on the optical path difference (OPD) map.
     
     Arguments:
         argList {[tuple]} -- Arguments to do the calculation.
@@ -486,37 +473,49 @@ def rmPTTfromOPD(inputFile, opdx, opdy):
 
     return opd
 
-def calc_pssn(array, wlum, aType="opd", D=8.36, r0inmRef=0.1382, zen=0,
-              pmask=0, imagedelta=0, fno=1.2335, debugLevel=0):
+def calc_pssn(array, wlum, aType="opd", D=8.36, r0inmRef=0.1382, zen=0, pmask=0, imagedelta=0, 
+              fno=1.2335, debugLevel=0):
     """
-    array: the array that contains either opd or pdf
-           opd need to be in microns
-    wlum: wavelength in microns
-    aType: what is used to calculate pssn - either opd or psf
-    psf doesn't matter, will be normalized anyway
-    D: side length of OPD image in meter
-    r0inmRef: fidicial atmosphere r0@500nm in meter, Konstantinos uses 0.20
-    Now that we use vonK atmosphere, r0in=0.1382 -> fwhm=0.6"
-    earlier, we used Kolm atmosphere, r0in=0.1679 -> fwhm=0.6"
-    zen: telescope zenith angle
-
-    The following are only needed when the input array is psf -
-    pmask: pupil mask. when opd is used, it can be generated using opd image,
-    we can put 0 or -1 or whatever here.
-    when psf is used, this needs to be provided separately with same
-    size as array.
-    imagedelta and fno are only needed when psf is used. use 0,0 for opd
-
-    THE INTERNAL RESOLUTION THAT FFTS OPERATE ON IS VERY IMPORTANT
-    TO THE ACCUARCY OF PSSN.
-    WHEN TYPE='OPD', NRESO=SIZE(ARRAY,1)
-    WHEN TYPE='PSF', NRESO=SIZE(PMASK,1)
-       for the psf option, we can not first convert psf back to opd then
-       start over,
-       because psf=|exp(-2*OPD)|^2. information has been lost in the | |^2.
-       we need to go forward with psf->mtf,
-       and take care of the coordinates properly.
+    
+    Calculate the normalized point source sensitivity (PSSN).
+    
+    Arguments:
+        array {[ndarray]} -- Array that contains either opd or pdf. opd need to be in microns.
+        wlum {[float]} -- Wavelength in microns.
+    
+    Keyword Arguments:
+        aType {str} -- What is used to calculate pssn - either opd or psf. (default: {"opd"})
+        D {float} -- Side length of OPD image in meter. (default: {8.36})
+        r0inmRef {float} -- Fidicial atmosphere r0 @ 500nm in meter, Konstantinos uses 0.20. 
+                            (default: {0.1382})
+        zen {float} -- Telescope zenith angle in degree. (default: {0})
+        pmask {float/ ndarray} -- Pupil mask. when opd is used, it can be generated using opd 
+                                  image, we can put 0 or -1 or whatever here. When psf is used, 
+                                  this needs to be provided separately with same size as array. 
+                                  (default: {0})
+        imagedelta {float} -- Only needed when psf is used. use 0 for opd. (default: {0})
+        fno {float} -- Only needed when psf is used. use 0 for opd. (default: {1.2335})
+        debugLevel {int} -- Debug level. The higher value gives more information. (default: {0})
+    
+    Returns:
+        [float] -- PSSN value.
     """
+
+    # Only needed for psf: pmask, imagedelta, fno
+
+    # THE INTERNAL RESOLUTION THAT FFTS OPERATE ON IS VERY IMPORTANT
+    # TO THE ACCUARCY OF PSSN.
+    # WHEN TYPE='OPD', NRESO=SIZE(ARRAY,1)
+    # WHEN TYPE='PSF', NRESO=SIZE(PMASK,1)
+    #    for the psf option, we can not first convert psf back to opd then
+    #    start over,
+    #    because psf=|exp(-2*OPD)|^2. information has been lost in the | |^2.
+    #    we need to go forward with psf->mtf,
+    #    and take care of the coordinates properly.
+   
+    # PSSN = (n_eff)_atm / (n_eff)_atm+sys
+    # (n_eff))_atm = 1 / (int (PSF^2)_atm dOmega)
+    # (n_eff))_atm+sys = 1 / (int (PSF^2)_atm+sys dOmega) 
 
     # Check the type is "OPD" or "PSF"
     if aType not in ("opd", "psf"):
@@ -554,71 +553,92 @@ def calc_pssn(array, wlum, aType="opd", D=8.36, r0inmRef=0.1382, zen=0,
         # padArray(pmask, m)
         iad = pmask
 
+    # OPD --> PSF --> OTF --> OTF' (OTF + atmosphere) --> PSF'
+    # Check with Bo that we could get OTF' or PSF' from PhoSim or not directly.
+    # The above question might not be a concern in the simulation.
+    # However, for the real image, it loooks like this is hard to do
+    # What should be the standard way to judge the PSSN in the real telescope?
+
     # OPD is zero for perfect telescope
     opdt = np.zeros((m, m))
 
     # OPD to PSF
-    psft = opd2psf(opdt, iad, wlum, imagedelta, 1, fno, debugLevel)
+    psft = opd2psf(opdt, iad, wlum, imagedelta=imagedelta, sensorFactor=1, fno=fno, 
+                   debugLevel=debugLevel)
     
     # PSF to optical transfer function (OTF)
     otft = psf2otf(psft)
 
     # Add atmosphere to perfect telescope
-    otfa = otft * mtfa
+    otfa = otft*mtfa
 
     # OTF to PSF
     psfa = otf2psf(otfa)
 
-    # Atmospheric PSS = 1/neff_atm
+    # Atmospheric PSS (point spread sensitivity) = 1/neff_atm
     pssa = np.sum(psfa**2)
 
-    # Calculate PSF of error
+    # Calculate PSF with error (atmosphere + system)
     if (aType == "opd"):
         
-        if array.ndim == 2:
+        if (array.ndim == 2):
             ninst = 1
         else:
             ninst = array.shape[0]
-        for i in range(ninst):
-            if array.ndim == 2:
+
+        for ii in range(ninst):
+            
+            if (array.ndim == 2):
                 array2D = array
             else:
-                array2D = array[i, :, :].squeeze()
-            psfei = opd2psf(array2D, iad, wlum, 0, 0, 0, debugLevel)
-            if i == 0:
+                array2D = array[ii, :, :].squeeze()
+           
+            psfei = opd2psf(array2D, iad, wlum, debugLevel=debugLevel)
+            
+            if (ii == 0):
                 psfe = psfei
             else:
                 psfe += psfei
 
-        psfe = psfe / ninst
+        # Do the normalization based on the number of instrument
+        psfe = psfe/ninst
 
     elif (aType == "psf"):
         
-        if array.shape[0] == mk:
+        if (array.shape[0] == mk):
             psfe = array
-        elif array.shape[0] > mk:
+        
+        elif (array.shape[0] > mk):
             psfe = extractArray(array, mk)
+        
         else:
-            print('calc_pssn: image provided too small, %d < %d x %6.4f' % (
-                array.shape[0], m, k))
-            print('IQ is over-estimated !!!')
+            print("calc_pssn: image provided too small, %d < %d x %6.4f." % (array.shape[0], m, k))
+            print("IQ is over-estimated !!!")
             psfe = padArray(array, mk)
 
-        psfe = psfe / np.sum(psfe) * np.sum(psft)
+        # Do the normalization of PSF
+        psfe = psfe/np.sum(psfe)*np.sum(psft)
 
-    otfe = psf2otf(psfe)  # OTF of error
+    # OTF with system error
+    otfe = psf2otf(psfe)
 
-    otftot = otfe * mtfa  # add atmosphere to error
+    # Add the atmosphere error
+    # OTF with system and atmosphere errors
+    otftot = otfe*mtfa
 
+    # PSF with system and atmosphere errors
     psftot = otf2psf(otftot)
-    pss = np.sum(psftot**2)  # atmospheric + error PSS
 
-    pssn = pss / pssa  # normalized PSS
-    if debugLevel >= 3:
-        print('pssn = %10.8e/%10.8e = %6.4f' % (pss, pssa, pssn))
+    # atmospheric + error PSS
+    pss = np.sum(psftot**2)
+
+    # normalized PSS
+    pssn = pss/pssa
+
+    if (debugLevel >= 3):
+        print("pssn = %10.8e/%10.8e = %6.4f." % (pss, pssa, pssn))
 
     return pssn
-
 
 def createMTFatm(D, m, k, wlum, zen, r0inmRef, model="vonK"):
     """
@@ -754,110 +774,198 @@ def r0Wz(r0inmRef, zen, wlum):
     
     return r0a
 
-def psf2eAtmW(array, wlum, type='opd', D=8.36, pmask=0, r0inmRef=0.1382,
-              sensorFactor=1,
-              zen=0, imagedelta=0.2, fno=1.2335, debugLevel=0):
+def psf2eAtmW(array, wlum, aType="opd", D=8.36, pmask=0, r0inmRef=0.1382,
+              sensorFactor=1, zen=0, imagedelta=0.2, fno=1.2335, debugLevel=0):
     """
-    array: wavefront OPD in micron, or psf image
-    unlike calc_pssn(), here imagedelta needs to be provided for type='opd'
-        because the ellipticity calculation operates on psf.
+    
+    Calculate the ellipticity with the error of atmosphere and weighting function.
+    
+    Arguments:
+        array {[ndarray]} -- Wavefront OPD in micron, or psf image.
+        wlum {[float]} -- Wavelength in microns.
+    
+    Keyword Arguments:
+        aType {str} -- Type of image ("opd" or "psf"). (default: {"opd"})
+        D {[float]} -- Side length of optical path difference (OPD) image in m. 
+                       (default: {8.36})
+        pmask {float/ ndarray} -- Pupil mask. (default: {0})
+        r0inmRef {float} -- Fidicial atmosphere r0 @ 500nm in meter. (default: {0.1382})
+        sensorFactor {float} -- Factor of sensor (check with Bo for this). (default: {1})
+        zen {[float]} -- Telescope zenith angle in degree. (default: {0})
+        imagedelta {float} -- Only needed when psf is used. 1 pixel = 0.2 arcsec. (default: {0.2})
+        fno {float} -- ? Check with Bo. (default: {1.2335})
+        debugLevel {int} -- Debug level. The higher value gives more information. (default: {0})
+    
+    Returns:
+        [float] -- Ellipticity.
+        [float] -- Correlation function (XX).
+        [float] -- Correlation function (YY).
+        [float] -- Correlation function (XY).
+    """
 
-    """
-    k = fno * wlum / imagedelta
-    if type == 'opd':
-        m = array.shape[0] / sensorFactor
-        psfe = opd2psf(array, 0, wlum, imagedelta,
-                       sensorFactor, fno, debugLevel)
+    # Unlike calc_pssn(), here imagedelta needs to be provided for type='opd'
+    # because the ellipticity calculation operates on psf.
+
+    # Get the k value
+    k = fno*wlum/imagedelta
+    
+    # Get the PSF with the system error
+    if aType == "opd":
+        m = array.shape[0]/sensorFactor
+        psfe = opd2psf(array, 0, wlum, imagedelta=imagedelta, sensorFactor=sensorFactor, 
+                       fno=fno, debugLevel=debugLevel)
     else:
         m = max(pmask.shape)
         psfe = array
+
+    # Opitcal transfer function (OTF) of system error
+    otfe = psf2otf(psfe)
+
+    # Modulation transfer function (MTF) with atmosphere
     mtfa = createMTFatm(D, m, k, wlum, zen, r0inmRef)
 
-    otfe = psf2otf(psfe)  # OTF of error
+    # OTF with system and atmosphere errors
+    otf = otfe*mtfa
 
-    otf = otfe * mtfa
+    # PSF with system and atmosphere errors
     psf = otf2psf(otf)
 
-    if debugLevel >= 3:
-        print('Below from the Gaussian weigting function on elli')
-    e, q11, q22, q12 = psf2eW(psf, imagedelta, wlum, 'Gau', debugLevel)
+    if (debugLevel >= 3):
+        print("Below from the Gaussian weigting function on ellipticity.")
+
+    # Get the ellipticity and correlation function
+    # The second input of psfeW should be pixeinum (1 pixel = 10 um). Check this part with Bo.
+    e, q11, q22, q12 = psf2eW(psf, imagedelta, wlum, atmModel="Gau", debugLevel=debugLevel)
 
     return e, q11, q22, q12
 
+def psf2eW(psf, pixinum, wlum, atmModel="Gau", debugLevel=0):
+    """
+    
+    Calculate the ellipticity with the weighting function.
+    
+    Arguments:
+        psf {[ndarray]} -- Point spread function (PSF).
+        pixinum {[str]} -- Pixel in um.
+        wlum {[float]} -- Wavelength in microns.
+    
+    Keyword Arguments:
+        atmModel {str} -- Atmosphere model ("Gau" or "2Gau"). (default: {"Gau"})
+        debugLevel {int} -- Debug level. The higher value gives more information. (default: {0})
+    
+    Returns:
+        [float] -- Ellipticity.
+        [float] -- Correlation function (XX).
+        [float] -- Correlation function (YY).
+        [float] -- Correlation function (XY).
+    """
 
-def psf2eW(psf, pixinum, wlum, atmModel, debugLevel=0):
+    # x, y positions
+    x, y = np.meshgrid(np.arange(1, psf.shape[0] + 1), np.arange(1, psf.shape[1] + 1))
 
-    x, y = np.meshgrid(np.arange(1, psf.shape[0] + 1),
-                       np.arange(1, psf.shape[1] + 1))
-    xbar = np.sum(x * psf) / np.sum(psf)
-    ybar = np.sum(y * psf) / np.sum(psf)
+    # Average x and y
+    xbar = np.sum(x*psf)/np.sum(psf)
+    ybar = np.sum(y*psf)/np.sum(psf)
 
+    # Show the averaged x and y
+    if (debugLevel >= 3):
+        print("xbar=%6.3f, ybar=%6.3f" % (xbar, ybar))
+
+    # Distance^2 to center
     r2 = (x - xbar)**2 + (y - ybar)**2
 
+    # Weighting function based on the atmospheric model
+    # FWHM is assigned to be 0.6 arcsec. Need to check with Bo for this.
     fwhminarcsec = 0.6
     oversample = 1
-    W = createAtm(atmModel, wlum, fwhminarcsec, r2, pixinum, oversample,
-                  0, '', debugLevel)
+    W = createAtm(wlum, fwhminarcsec, r2, pixinum, oversample, model=atmModel, debugLevel=debugLevel)
 
-    if debugLevel >= 3:
-        print('xbar=%6.3f, ybar=%6.3f' % (xbar, ybar))
-        # plot.plotImage(psf,'')
-        # plot.plotImage(W,'')
+    # Apply the weighting function to PSF
+    psf = psf*W
 
-    psf = psf * W  # apply weighting function
-
+    # Correlation function
     Q11 = np.sum(((x - xbar)**2) * psf) / np.sum(psf)
     Q22 = np.sum(((y - ybar)**2) * psf) / np.sum(psf)
     Q12 = np.sum(((x - xbar) * (y - ybar)) * psf) / np.sum(psf)
 
+    # Calculate the ellipticity
     T = Q11 + Q22
-    if T > 1e-20:
+    if (T > 1e-20):
         e1 = (Q11 - Q22) / T
         e2 = 2 * Q12 / T
 
         e = np.sqrt(e1**2 + e2**2)
+
+    # No correlation
     else:
         e = 0
 
     return e, Q11, Q22, Q12
 
+def createAtm(wlum, fwhminarcsec, gridsize, pixinum, oversample, model="Gau", debugLevel=0):
+    """
+    
+    Calculate the weighting function for a certain atmosphere model.
+    
+    Arguments:
+        wlum {[float]} -- Wavelength in microns.
+        fwhminarcsec {[float]} -- Full width in half maximum (FWHM) in arcsec.
+        gridsize {[int/ ndarray]} -- Size of grid. If it is the array, it should be (distance to center)^2.
+                                     That means r2.
+        pixinum {[float]} -- Pixel in um.
+        oversample {[int]} -- k times of image resolution compared with the original one.
+    
+    Keyword Arguments:
+        model {str} -- Atmosphere model ("Gau" or "2Gau"). (default: {"Gau"})
+        debugLevel {int} -- Debug level. The higher value gives more information. (default: {0})
+    
+    Returns:
+        [ndarray] -- Weighting function of atmosphere.
+    """
 
-def createAtm(model, wlum, fwhminarcsec, gridsize, pixinum, oversample,
-              cutOutput, outfile, debugLevel):
-    """
-    gridsize can be int or an array. When it is array, it is r2
-    cutOutput only applies to Kolm and vonK
-    """
+    # Get the weighting function
+
+    # Distance^2 to center
     if isinstance(gridsize, (int)):
-        nreso = gridsize * oversample
-        nr = nreso / 2  # n for radius length
+        nreso = gridsize*oversample
+
+        # n for radius length
+        nr = nreso/2
         aa = np.linspace(-nr + 0.5, nr - 0.5, nreso)
         x, y = np.meshgrid(aa)
+        
         r2 = x * x + y * y
+    
     else:
         r2 = gridsize
 
-    if model[:4] == 'Kolm' or model[:4] == 'vonK':
-        pass
-    else:
-        fwhminum = fwhminarcsec / 0.2 * 10
-        if model == 'Gau':
-            sig = fwhminum / 2 / np.sqrt(2 * np.log(2))  # in micron
-            sig = sig / (pixinum / oversample)
-            z = np.exp(-r2 / 2 / sig**2)
-        elif model == '2Gau':
-            # below is used to manually solve for sigma
-            # let x = exp(-r^2/(2*alpha^2)), which results in 1/2*max
-            # we want to get (1+.1)/2=0.55 from below
-            # x=0.4673194304;printf('%20.10f\n'%x**.25*.1+x);
-            sig = fwhminum / (2 * np.sqrt(-2 * np.log(0.4673194304)))
-            sig = sig / (pixinum / oversample)  # in (oversampled) pixel
-            z = np.exp(-r2 / 2 / sig**2) + 0.4 / 4 * np.exp(-r2 / 8 / sig**2)
-        if debugLevel >= 3:
-            print('sigma1=%6.4f arcsec' %
-                  (sig * (pixinum / oversample) / 10 * 0.2))
-    return z
+    # FWHM in arcsec --> FWHM in um
+    fwhminum = fwhminarcsec / 0.2 * 10
 
+    # Calculate the weighting function
+    if (model == "Gau"):
+        # Sigma in um
+        sig = fwhminum / 2 / np.sqrt(2 * np.log(2))
+        sig = sig / (pixinum / oversample)
+
+        z = np.exp(-r2 / 2 / sig**2)
+    
+    elif (model == "2Gau"):
+        # Below is used to manually solve for sigma
+        # let x = exp(-r^2/(2*alpha^2)), which results in 1/2*max
+        # we want to get (1+.1)/2=0.55 from below
+        # x=0.4673194304; printf('%20.10f\n'%x**.25*.1+x);
+        sig = fwhminum / (2 * np.sqrt(-2 * np.log(0.4673194304)))
+        
+        # In (oversampled) pixel
+        sig = sig / (pixinum / oversample)
+
+        z = np.exp(-r2 / 2 / sig**2) + 0.4 / 4 * np.exp(-r2 / 8 / sig**2)
+
+    if (debugLevel >= 3):
+        print("sigma1=%6.4f arcsec" % (sig * (pixinum / oversample) / 10 * 0.2))
+    
+    return z
 
 def opd2psf(opd, pupil, wavelength, imagedelta=0, sensorFactor=1, fno=1.2335, debugLevel=0):
     """
@@ -872,8 +980,9 @@ def opd2psf(opd, pupil, wavelength, imagedelta=0, sensorFactor=1, fno=1.2335, de
     
     Keyword Arguments:
         imagedelta {float} -- Pixel size in um. Use 0 if pixel size is not specified. (default: {0})
-        sensorFactor {float} -- Factor of sensor (check with Bo for this). (default: {1})
-        fno {float} -- ? Check with Bo. (default: {1.2335})
+        sensorFactor {float} -- Factor of sensor (check with Bo for this). Only need this if 
+                                imagedelta != 0. (default: {1})
+        fno {float} -- ? Check with Bo. Only need this if imagedelta=0. (default: {1.2335})
         debugLevel {int} -- Debug level. The higher value gives more information. (default: {0})
     
     Returns:
