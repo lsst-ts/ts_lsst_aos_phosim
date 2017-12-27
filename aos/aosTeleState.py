@@ -1104,6 +1104,7 @@ class aosTeleState(object):
                 fid.close()
 
             # Set the comera configuration and write into the file
+            # Check the number after "SIM_CAMCONFIG" with Bo.
             if (self.inst == self.LSST):
                 content = "SIM_CAMCONFIG 2\n"
             elif (self.inst == self.ComCam):
