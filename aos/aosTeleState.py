@@ -645,6 +645,7 @@ class aosTeleState(object):
             ii = (self.stateV > ctrlRange).argmax()
             raise RuntimeError("stateV[%d] = %e > its range = %e" % (ii, self.stateV[ii], ctrlRange[ii]))
 
+        # Check with Bo why there is no coordinate transformation to Zemax here. I think there should be it here.
         # If the elevation angle changes, the print through maps need to change also.
         if (self.M1M3surf is not None):
 
@@ -685,7 +686,7 @@ class aosTeleState(object):
 
         Arguments:
             simuParamDataDir {[str]} -- Directory of simulation parameter files.
-            zAngle {[float]} -- Zenith angle.
+            zAngle {[float]} -- Zenith angle. The unit here should be radian. Check with Bo.
             distType {[str]} -- Distortion type.
             pre_elev {[float]} -- ?? Check with Bo.
             pre_camR {[float]} -- ?? Check with Bo.
