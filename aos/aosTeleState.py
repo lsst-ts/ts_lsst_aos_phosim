@@ -193,6 +193,7 @@ class aosTeleState(object):
             M1M3.setPrintthz_iter0(M1M3.getPrintthz(zenithAngle0))
 
             # Get the actuator forces of M1M3 based on the look-up table (LUT)
+            # Check the force unit with Bo.
             LUTforce = getLUTforce(zenithAngle0/np.pi*180, M1M3.LUTfile)
 
             # Add 5% force error (self.M1M3ForceError). This is for iteration 0 only.
