@@ -395,8 +395,7 @@ def runPSSN(argList):
     opd = rmPTTfromOPD(inputFile[0], opdx, opdy)
 
     # Calculate the normalized point source sensitivity (PSSN)
-    # It is noted that the telecope zenith angle has the default value of 0. Do we need to update this?
-    # Check this with Bo.
+    # Because the error budget is defined at zenith=0. So we calculate pssn at zenith=0.
     pssn = calc_pssn(opd, wavelength, zen=0, debugLevel=debugLevel)
 
     return pssn
