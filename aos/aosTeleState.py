@@ -1072,6 +1072,8 @@ class aosTeleState(object):
 
         for irun in range(wfs.nRun):
 
+            # There should be the camera rotation here. Check with Bo.
+
             # Intrument condition used for PhoSim
             content = ""
             content += "Opsim_filter %d\n" % phosimFilterID[self.band]
