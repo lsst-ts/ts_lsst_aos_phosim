@@ -1073,6 +1073,7 @@ class aosTeleState(object):
         for irun in range(wfs.nRun):
 
             # There should be the camera rotation here. Check with Bo.
+            # The SIM_NSNAP and SIM_VISTIME setting are wield for comcam. Check with Bo.
 
             # Intrument condition used for PhoSim
             content = ""
