@@ -808,10 +808,10 @@ class aosTeleState(object):
             # Check with Bo.
             zz = np.loadtxt(self.M1M3zlist)
             for ii in range(self.znPert):
-                # Check the unit here with Bo. For PhoSim, the unit is mm.
+                # For PhoSim, the unit is mm.
                 content += "izernike 0 %d %s\n" % (ii, zz[ii]*1e-3) 
             for ii in range(self.znPert):
-                # Check the unit here with Bo. For PhoSim, the unit is mm.
+                # For PhoSim, the unit is mm.
                 content += "izernike 2 %d %s\n" % (ii, zz[ii]*1e-3)
 
             # Do not understand why this residue map is important to PhoSim. Check with Bo.
@@ -830,7 +830,7 @@ class aosTeleState(object):
                         self.M2zlist, self.resFile2, self.surfaceGridN)
             zz = np.loadtxt(self.M2zlist)
             for ii in range(self.znPert):
-                # Check the unit here with Bo. For PhoSim, the unit is mm.
+                # For PhoSim, the unit is mm.
                 content += "izernike 1 %d %s\n" % (ii, zz[ii]*1e-3) 
 
             # Do not understand why this residue map is important to PhoSim. Check with Bo.
