@@ -339,7 +339,6 @@ class aosTeleState(object):
             if (not(line.startswith("#")) and (not iscomment) and len(line) > 0):
 
                 # Used for the single degree of freedom (DOF) unit testing
-                # Check with Bo the reason to have this
                 if (line.startswith("dof")):
 
                     # Get the values
@@ -388,10 +387,8 @@ class aosTeleState(object):
                 elif (line.startswith("camRotation") and self.inst == self.LSST):
                     self.camRot = float(line.split()[1])
 
-                    # Check with Bo how to get this compenstation of iqBudget
                     self.iqBudget = np.sqrt(self.iqBudget**2 + float(line.split()[3])**2)
 
-                # Check with Bo for the unit of this
                 elif (line.startswith("M1M3ForceError")):
                     self.M1M3ForceError = float(line.split()[1])
 
@@ -427,7 +424,6 @@ class aosTeleState(object):
                 elif (line.startswith("znPert")):
                     self.znPert = int(line.split()[1])
 
-                # Check with Bo for the meaning of this
                 elif (line.startswith("surfaceGridN")):
                     self.surfaceGridN = int(line.split()[1])
 
@@ -687,7 +683,7 @@ class aosTeleState(object):
 
         Arguments:
             simuParamDataDir {[str]} -- Directory of simulation parameter files.
-            zAngle {[float]} -- Zenith angle. The unit here should be radian. Check with Bo.
+            zAngle {[float]} -- Zenith angle. The unit here should be radian.
             distType {[str]} -- Distortion type.
             pre_elev {[float]} -- ?? Check with Bo.
             pre_camR {[float]} -- ?? Check with Bo.
@@ -866,8 +862,6 @@ class aosTeleState(object):
             debugLevel {int} -- Debug level. The higher value gives more information.
                                 (default: {0})
         """
-
-        # The boundary of OPD image is dangerous for the calculation. Check with Bo.
 
         # Calculate OPD by PhoSim if necessary
         if (not opdoff):
@@ -1109,7 +1103,6 @@ class aosTeleState(object):
                 fid.close()
 
             # Set the comera configuration and write into the file
-            # Check the number after "SIM_CAMCONFIG" with Bo.
             if (self.inst == self.LSST):
                 content = "SIM_CAMCONFIG 2\n"
             elif (self.inst == self.ComCam):
@@ -1464,7 +1457,6 @@ def gridSamp(xf, yf, zf, innerR, outerR, resFile, nx, ny, plotFig=False):
         plotFig {bool} -- Plot the figure or not. (default: {False})
     """
 
-    # Do not understand the meaning for this map. Check with Bo.
     # This function shall be rewritten and put into mirror class in the final.
 
     # Radial basis function approximation/interpolation of surface
@@ -1555,7 +1547,6 @@ def gridSamp(xf, yf, zf, innerR, outerR, resFile, nx, ny, plotFig=False):
 
     outid.close()
 
-    # Discuss with Bo for the meaning of this figure.
     if plotFig:
 
         fig, ax = plt.subplots(1, 2, figsize=(10, 5))
