@@ -193,7 +193,7 @@ class aosTeleState(object):
             M1M3.setPrintthz_iter0(M1M3.getPrintthz(zenithAngle0))
 
             # Get the actuator forces of M1M3 based on the look-up table (LUT)
-            # Check the force unit with Bo.
+            # The unit of force is N.
             LUTforce = getLUTforce(zenithAngle0/np.pi*180, M1M3.LUTfile)
 
             # Add 5% force error (self.M1M3ForceError). This is for iteration 0 only.
@@ -270,7 +270,7 @@ class aosTeleState(object):
 
         else:
             # zAngle is extracted from OpSim ObsHistory.
-            # This is 90-block['altitude'].values[:100]/np.pi*180 --> Check the data format with Bo.
+            # This is 90-block['altitude'].values[:100]/np.pi*180
             zenithAngleFile = os.path.join(opSimHisDir, (zAngle + ".txt"))
             obsData = np.loadtxt(zenithAngleFile).reshape((-1, 1))
 
@@ -363,7 +363,8 @@ class aosTeleState(object):
 
                 # Budget of image quality
                 elif (line.startswith("iqBudget")):
-                    # Read in mas, convert to arcsec (Check with Bo the meaning of "mas" here)
+                    # Read in mas, convert to arcsec
+                    # mas: milli-arcsec
                     self.iqBudget = np.sqrt(np.sum(np.array(line.split()[1:], dtype=float)**2))
 
                 # Budget of ellipticity
@@ -375,7 +376,7 @@ class aosTeleState(object):
                     self.zAngle = line.split()[1]
 
                 # Camera temperature in degree C
-                # Ignore this if the instrument is comcam (Check with Bo for this ignorance)
+                # Ignore this if the instrument is comcam
                 elif (line.startswith("camTB") and self.inst == self.LSST):
                     self.camTB = float(line.split()[1])
 
@@ -383,7 +384,7 @@ class aosTeleState(object):
                     self.iqBudget = np.sqrt(self.iqBudget**2 + float(line.split()[3])**2)
 
                 # Camera rotation angle
-                # Ignore this if the instrument is comcam (Check with Bo for this ignorance)
+                # Ignore this if the instrument is comcam
                 elif (line.startswith("camRotation") and self.inst == self.LSST):
                     self.camRot = float(line.split()[1])
 
@@ -392,7 +393,6 @@ class aosTeleState(object):
                 elif (line.startswith("M1M3ForceError")):
                     self.M1M3ForceError = float(line.split()[1])
 
-                # Check with Bo how to get these temperature related parameters
                 elif (line.startswith("M1M3TxGrad")):
                     self.M1M3TxGrad = float(line.split()[1])
 
@@ -663,9 +663,9 @@ class aosTeleState(object):
         Arguments:
             simuParamDataDir {[str]} -- Directory of simulation parameter files.
             zAngle {[float]} -- Zenith angle.
-            pre_elev {[float]} -- ?? Check with Bo.
-            pre_camR {[float]} -- ?? Check with Bo.
-            pre_temp_camR {[float]} -- ?? Check with Bo.
+            pre_elev {[float]} -- Pre-compensated elevation angle.
+            pre_camR {[float]} -- Pre-compensated camera rotation angle.
+            pre_temp_camR {[float]} -- Pre-compensated camera temperature.
         """
 
         # List of camera distortion
@@ -685,9 +685,9 @@ class aosTeleState(object):
             simuParamDataDir {[str]} -- Directory of simulation parameter files.
             zAngle {[float]} -- Zenith angle. The unit here should be radian.
             distType {[str]} -- Distortion type.
-            pre_elev {[float]} -- ?? Check with Bo.
-            pre_camR {[float]} -- ?? Check with Bo.
-            pre_temp_camR {[float]} -- ?? Check with Bo.
+            pre_elev {[float]} -- Pre-compensated elevation angle.
+            pre_camR {[float]} -- Pre-compensated camera rotation angle.
+            pre_temp_camR {[float]} -- Pre-compensated camera temperature.
         """
 
         # Path to camera distortion parameter file
