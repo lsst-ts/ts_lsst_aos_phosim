@@ -697,7 +697,7 @@ class aosTeleState(object):
         data = np.loadtxt(dataFile, skiprows=1)
 
         # Calculate the distortion (dx, dy, dz, rx, ry, rz)
-        # Check with Bo for the math here
+        # This is for the gravity projection (formula).
         distFun = lambda zenithAngle, camRotAngle: data[0, 3:]*np.cos(zenithAngle) + \
                     ( data[1, 3:]*np.cos(camRotAngle) + data[2, 3:]*np.sin(camRotAngle) )*np.sin(zenithAngle)
         distortion = distFun(zAngle, self.camRot) - distFun(pre_elev, pre_camR)
