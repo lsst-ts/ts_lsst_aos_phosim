@@ -642,14 +642,10 @@ class aosTeleState(object):
             ii = (self.stateV > ctrlRange).argmax()
             raise RuntimeError("stateV[%d] = %e > its range = %e" % (ii, self.stateV[ii], ctrlRange[ii]))
 
-        # Check with Bo why there is no coordinate transformation to Zemax here. I think there should be it here.
-        # If the elevation angle changes, the print through maps need to change also.
         if (self.M1M3surf is not None):
 
-            # If considering the elevation angle change, the statement should be something like:
-            # if (self.iIter >= 1):
-            #     self.M1M3surf += (M1M3.getPrintthz(self.zAngle[self.iIter]) - M1M3.getPrintthz(self.zAngle[self.iIter-1]))*1e6
-
+            # The code here need to add the Zemax coordinate transformation. Bo had updated the code
+            # on github. This script does not correct it.
             self.M1M3surf += (M1M3.getPrintthz(self.zAngle[self.iIter]) - M1M3.printthz_iter0)*1e6
 
         if (self.M2surf is not None):

@@ -250,11 +250,11 @@ class aosWFS(object):
                         if (iField == metr.nField):
                             psf = np.flipud(np.rot90(np.flipud(psf), 2))
                         
-                        # iField = 32
+                        # iField = 32 --> R04_S20
                         elif (iField == metr.nField+1):
                             psf = np.flipud(np.rot90(np.flipud(psf), 3))
                         
-                        # iField = 33 --> R00_S22
+                        # iField = 34 --> R40_S02
                         elif (iField == metr.nField+3):
                             psf = np.flipud(np.rot90(np.flipud(psf), 1))
 
